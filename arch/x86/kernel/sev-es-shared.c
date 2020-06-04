@@ -457,9 +457,12 @@ static enum es_result vc_handle_cpuid(struct ghcb *ghcb,
 	struct pt_regs *regs = ctxt->regs;
 	u32 cr4 = native_read_cr4();
 	enum es_result ret;
+	const u32 eax = regs->ax & 0xffffffffU;
+	const u32 ecx = regs->cx & 0xffffffffU;
+	const bool request_feature_bits = (eax == 0x1U);
 
-	ghcb_set_rax(ghcb, regs->ax & 0xffffffff);
-	ghcb_set_rcx(ghcb, regs->cx & 0xffffffff);
+	ghcb_set_rax(ghcb, eax);
+	ghcb_set_rcx(ghcb, ecx);
 
 	if (cr4 & X86_CR4_OSXSAVE)
 		/* Safe to read xcr0 */
@@ -476,6 +479,16 @@ static enum es_result vc_handle_cpuid(struct ghcb *ghcb,
 	      ghcb_is_valid_rbx(ghcb) &&
 	      ghcb_is_valid_rcx(ghcb) &&
 	      ghcb_is_valid_rdx(ghcb)))
+		return ES_VMM_ERROR;
+
+	/*
+	 * Without RDRAND, KASLR relies on the TSC value for randomnization
+	 * which is controlled by the HV either through interception or modifying
+	 * the TSC_RATIO_MSR.
+	 * As a hardening, RDRAND is made a minimal required feature and VM
+	 * returns error if the HV states that RDRAND is not supported.
+	*/
+	if (request_feature_bits && !(ghcb->save.rcx & (1U << 30)))
 		return ES_VMM_ERROR;
 
 	regs->ax = ghcb->save.rax & 0xffffffff;
