@@ -3339,6 +3339,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t gpa, int write,
 			bool prefault, bool account_disallowed_nx_lpage)
 {
 	struct kvm_shadow_walk_iterator it;
+	bool allow_prefetch = true;
 	struct kvm_mmu_page *sp;
 	int level, ret;
 	gfn_t gfn = gpa >> PAGE_SHIFT;
@@ -3346,6 +3347,9 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t gpa, int write,
 
 	if (WARN_ON(!VALID_PAGE(vcpu->arch.mmu->root_hpa)))
 		return RET_PF_RETRY;
+
+	if (kvm_x86_ops.rmp_level_adjust)
+		kvm_x86_ops.rmp_level_adjust(vcpu, gfn, &pfn, &max_level, &allow_prefetch);
 
 	level = kvm_mmu_hugepage_adjust(vcpu, gfn, max_level, &pfn);
 
@@ -3375,7 +3379,10 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t gpa, int write,
 	ret = mmu_set_spte(vcpu, it.sptep, ACC_ALL,
 			   write, level, base_gfn, pfn, prefault,
 			   map_writable);
-	direct_pte_prefetch(vcpu, it.sptep);
+
+	if (allow_prefetch)
+		direct_pte_prefetch(vcpu, it.sptep);
+
 	++vcpu->stat.pf_fixed;
 	return ret;
 }

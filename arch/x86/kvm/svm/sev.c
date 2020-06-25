@@ -38,6 +38,8 @@ static void *rmp_table_vaddr;
 static void snp_print_rmpentry(u64 spa);
 static void snp_free_context_page(struct page *page);
 static int snp_decommission_context(struct kvm *kvm);
+static void snp_read_rmpentry(u64 spa, struct rmp_entry *e);
+static bool is_large_rmpentry(struct kvm *kvm, u64 spa);
 
 struct enc_region {
 	struct list_head list;
@@ -1007,6 +1009,25 @@ e_free:
 e_unpin_memory:
 	sev_unpin_memory(kvm, pages, n);
 	return ret;
+}
+
+static void snp_read_rmpentry(u64 spa, struct rmp_entry *ret)
+{
+	unsigned long start = (unsigned long)rmp_table_vaddr + (4 * PAGE_SIZE);
+	uint8_t *ptr;
+
+	start += sizeof(struct rmp_entry) * (spa >> PAGE_SHIFT);
+	ptr = (uint8_t *)start;
+	memcpy(ret, ptr, sizeof(*ret));
+}
+
+static bool is_large_rmpentry(struct kvm *kvm, u64 spa)
+{
+	struct rmp_entry e;
+
+	snp_read_rmpentry(spa & PMD_MASK, &e);
+
+	return rmp_entry_assigned(&e) && (rmp_entry_page_size(&e) == RMP_PG_SIZE_2M);
 }
 
 static void snp_print_rmpentry(u64 spa)
@@ -2275,4 +2296,20 @@ void sev_es_vcpu_put(struct vcpu_svm *svm)
 
 		wrmsrl(host_save_user_msrs[i].index, svm->host_user_msrs[i]);
 	}
+}
+
+void svm_rmp_level_adjust(struct kvm_vcpu *vcpu, gfn_t gfn, kvm_pfn_t *pfnp,
+			  int *max_level, bool *allow_prefetch)
+{
+	unsigned long spa = *pfnp << PAGE_SHIFT;
+
+	if (!sev_snp_guest(vcpu->kvm))
+		return;
+
+	if (is_large_rmpentry(vcpu->kvm, spa))
+		*max_level = PT_DIRECTORY_LEVEL;
+	else
+		*max_level = PT_PAGE_TABLE_LEVEL;
+
+	*allow_prefetch = false;
 }
