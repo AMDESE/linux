@@ -197,6 +197,10 @@ module_param(sev, int, 0444);
 int sev_es = IS_ENABLED(CONFIG_AMD_MEM_ENCRYPT_ACTIVE_BY_DEFAULT);
 module_param(sev_es, int, 0444);
 
+/* enable/disable SEV-SNP support */
+int sev_snp = IS_ENABLED(CONFIG_AMD_MEM_ENCRYPT_ACTIVE_BY_DEFAULT);
+module_param(sev_snp, int, 0444);
+
 static bool __read_mostly dump_invalid_vmcb = 0;
 module_param(dump_invalid_vmcb, bool, 0644);
 
@@ -883,6 +887,7 @@ static __init int svm_hardware_setup(void)
 	} else {
 		sev = false;
 		sev_es = false;
+		sev_snp = false;
 	}
 
 	svm_adjust_mmio_mask();

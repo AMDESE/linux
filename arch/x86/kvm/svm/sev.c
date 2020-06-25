@@ -31,6 +31,7 @@ unsigned int max_sev_asid;
 static unsigned int min_sev_asid;
 static unsigned long *sev_asid_bitmap;
 static unsigned long *sev_reclaim_asid_bitmap;
+static void *rmp_table_vaddr;
 
 struct enc_region {
 	struct list_head list;
@@ -1178,9 +1179,38 @@ void sev_vm_destroy(struct kvm *kvm)
 	sev_asid_free(sev->asid);
 }
 
+static __init int init_rmp_table(void)
+{
+	u64 rmp_base, rmp_end;
+	unsigned long sz;
+
+	rdmsrl_safe(MSR_AMD64_RMP_BASE, &rmp_base);
+	rdmsrl_safe(MSR_AMD64_RMP_END, &rmp_end);
+
+	if (!rmp_base || !rmp_end)
+		return 1;
+
+	sz = rmp_end - rmp_base;
+
+	rmp_table_vaddr = memremap(rmp_base, sz, MEMREMAP_WB);
+	if (!rmp_table_vaddr) {
+		pr_err("SNP: failed to remap 0x%llx-0x%llx\n", rmp_base, rmp_end);
+		return 1;
+	}
+
+	return 0;
+}
+
+static __exit void rmp_unsetup(void)
+{
+	if (rmp_table_vaddr)
+		memunmap(rmp_table_vaddr);
+}
+
 void __init sev_hardware_setup(void)
 {
 	unsigned int eax, ebx, ecx, edx;
+	bool sev_snp_supported = false;
 	bool sev_es_supported = false;
 	bool sev_supported = false;
 
@@ -1196,6 +1226,10 @@ void __init sev_hardware_setup(void)
 
 	/* Maximum number of encrypted guests supported simultaneously */
 	max_sev_asid = ecx;
+
+	/* SNP requires the SEV-ES to be enabled */
+	if (sev_snp)
+		sev_es = 1;
 
 	if (!svm_sev_enabled())
 		goto out;
@@ -1230,9 +1264,23 @@ void __init sev_hardware_setup(void)
 	pr_info("SEV-ES supported: %u ASIDs\n", min_sev_asid - 1);
 	sev_es_supported = true;
 
+	/* SEV-SNP support requested? */
+	if (!sev_snp)
+		goto out;
+
+	/* Does the CPU support SEV-SNP? */
+	if (!boot_cpu_has(X86_FEATURE_SEV_SNP))
+		goto out;
+
+	if (init_rmp_table())
+		goto out;
+
+	pr_info("SEV-SNP supported: %u ASIDs\n", min_sev_asid - 1);
+	sev_snp_supported = true;
 out:
 	sev = sev_supported;
 	sev_es = sev_es_supported;
+	sev_snp = sev_snp_supported;
 }
 
 void sev_hardware_teardown(void)
@@ -1240,6 +1288,7 @@ void sev_hardware_teardown(void)
 	if (!svm_sev_enabled())
 		return;
 
+	rmp_unsetup();
 	bitmap_free(sev_asid_bitmap);
 	bitmap_free(sev_reclaim_asid_bitmap);
 
