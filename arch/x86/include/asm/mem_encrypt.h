@@ -16,6 +16,61 @@
 
 #include <asm/bootparam.h>
 
+struct rmp_entry {
+	u64 low;
+	u64 high;
+} __packed;
+
+static inline bool rmp_entry_assigned(struct rmp_entry *v)
+{
+	return !!(v->low & 1);
+}
+
+static inline bool rmp_entry_immutable(struct rmp_entry *v)
+{
+	return !!((v->low >> 2) & 1);
+}
+
+static inline int rmp_entry_page_size(struct rmp_entry *v)
+{
+	return (v->low >> 1) & 1;
+}
+
+struct rmpupdate_entry {
+	u64 gpa;
+	u8 assigned;
+
+#define RMP_PG_SIZE_2M 1
+#define RMP_PG_SIZE_4K 0
+	u8 pagesize;
+	u8 immutable;
+	u8 rsvd;
+	u32 asid;
+} __packed;
+
+static inline int snp_rmpupdate_set(u64 spa, struct rmpupdate_entry *e)
+{
+	bool flush = true;
+	int ret;
+
+	asm volatile(".byte 0xF2, 0x0F, 0x01, 0xFE\n\t" // rmpupdate
+		     : "=a"(ret)
+		     : "a"(spa), "c"((unsigned long)e), "d"(flush) : "memory");
+
+	return ret;
+}
+
+static inline int snp_psmash(u64 spa)
+{
+	int ret;
+
+	asm volatile(".byte 0xF3, 0x0F, 0x01, 0xFF\n\t" // psmash
+		     : "=a"(ret)
+		     : "a"(spa) : "memory");
+
+	return ret;
+}
+
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 
 extern u64 sme_me_mask;
