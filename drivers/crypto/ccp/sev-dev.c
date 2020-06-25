@@ -21,8 +21,11 @@
 #include <linux/ccp.h>
 #include <linux/firmware.h>
 #include <linux/io.h>
+#include <linux/mem_encrypt.h>
 
 #include <asm/smp.h>
+#include <asm/svm.h>
+#include <asm/set_memory.h>
 
 #include "psp-dev.h"
 #include "sev-dev.h"
@@ -145,12 +148,34 @@ static int sev_cmd_buffer_len(int cmd)
 	return 0;
 }
 
+static bool sev_legacy_cmd_buf_writable(int cmd)
+{
+	switch (cmd) {
+	case SEV_CMD_PLATFORM_STATUS:
+	case SEV_CMD_GUEST_STATUS:
+	case SEV_CMD_LAUNCH_START:
+	case SEV_CMD_RECEIVE_START:
+	case SEV_CMD_LAUNCH_MEASURE:
+	case SEV_CMD_SEND_START:
+	case SEV_CMD_SEND_UPDATE_DATA:
+	case SEV_CMD_SEND_UPDATE_VMSA:
+	case SEV_CMD_PEK_CSR:
+	case SEV_CMD_PDH_CERT_EXPORT:
+	case SEV_CMD_GET_ID:
+		return true;
+	default: return false;
+	}
+}
+
 static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 {
 	struct psp_device *psp = psp_master;
 	struct sev_device *sev;
 	unsigned int phys_lsb, phys_msb;
 	unsigned int reg, ret = 0;
+	struct page *cmd_page = NULL;
+	size_t cmd_buf_len = sev_cmd_buffer_len(cmd);
+	struct rmpupdate_entry e = {};
 
 	if (!psp || !psp->sev_data)
 		return -ENODEV;
@@ -160,15 +185,54 @@ static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 
 	sev = psp->sev_data;
 
+	/*
+	 * Check If SNP is initialized and we are asked to execute a legacy
+	 * command that requires write by the firmware in the command buffer.
+	 * In that use an intermedite command buffer page to complete the
+	 * operation.
+	 *
+	 * NOTE: if the command buffer contains a pointer which will be modified
+	 * by the firmware then caller must take care of it.
+	 */
+	if (sev->snp_inited && sev_legacy_cmd_buf_writable(cmd)) {
+		cmd_page = alloc_page(GFP_KERNEL_ACCOUNT | __GFP_ZERO);
+		if (!cmd_page)
+			return -ENOMEM;
+
+		if (set_memory_4k((unsigned long)page_address(cmd_page), 1)) {
+			dev_err(sev->dev, "failed to split page\n");
+			goto e_free;
+		}
+
+		memcpy(page_address(cmd_page), data, cmd_buf_len);
+
+		/* make it as a firmware page */
+		e.immutable = true;
+		e.assigned = true;
+		ret = snp_rmpupdate_set(page_to_pfn(cmd_page) << PAGE_SHIFT, &e);
+		if (ret) {
+			dev_err(sev->dev, "sev cmd id %#x, failed to change to "
+					"firmware state (spa 0x%lx ret %d).\n",
+					cmd, page_to_pfn(cmd_page) << PAGE_SHIFT,
+					ret);
+			goto e_free;
+		}
+	}
+
 	/* Get the physical address of the command buffer */
-	phys_lsb = data ? lower_32_bits(__psp_pa(data)) : 0;
-	phys_msb = data ? upper_32_bits(__psp_pa(data)) : 0;
+	if (cmd_page) {
+		phys_lsb = data ? lower_32_bits(__sme_page_pa(cmd_page)) : 0;
+		phys_msb = data ? upper_32_bits(__sme_page_pa(cmd_page)) : 0;
+	} else {
+		phys_lsb = data ? lower_32_bits(__psp_pa(data)) : 0;
+		phys_msb = data ? upper_32_bits(__psp_pa(data)) : 0;
+	}
 
 	dev_dbg(sev->dev, "sev command id %#x buffer 0x%08x%08x timeout %us\n",
 		cmd, phys_msb, phys_lsb, psp_timeout);
 
 	print_hex_dump_debug("(in):  ", DUMP_PREFIX_OFFSET, 16, 2, data,
-			     sev_cmd_buffer_len(cmd), false);
+				cmd_buf_len, false);
 
 	iowrite32(phys_lsb, sev->io_regs + sev->vdata->cmdbuff_addr_lo_reg);
 	iowrite32(phys_msb, sev->io_regs + sev->vdata->cmdbuff_addr_hi_reg);
@@ -182,6 +246,26 @@ static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 
 	/* wait for command completion */
 	ret = sev_wait_cmd_ioc(sev, &reg, psp_timeout);
+
+	/* if an intermediate page is used then copy the data back to original */
+	if (cmd_page) {
+		int rc;
+		/* make it as a hypervisor page */
+		memset(&e, 0, sizeof(struct rmpupdate_entry));
+		rc = snp_rmpupdate_set(page_to_pfn(cmd_page) << PAGE_SHIFT, &e);
+		if (rc) {
+			dev_err(sev->dev, "sev cmd id %#x, failed to change to "
+					"hypervisor state ret=%d.\n", cmd, rc);
+			/*
+			 * set the command page to NULL so that we don't free it if
+			 * we fail to make it a hypervisor page.
+			 */
+			cmd_page = NULL;
+		} else {
+			memcpy(data, page_address(cmd_page), cmd_buf_len);
+		}
+	}
+
 	if (ret) {
 		if (psp_ret)
 			*psp_ret = 0;
@@ -189,7 +273,7 @@ static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 		dev_err(sev->dev, "sev command %#x timed out, disabling PSP\n", cmd);
 		psp_dead = true;
 
-		return ret;
+		goto e_free;
 	}
 
 	psp_timeout = psp_cmd_timeout;
@@ -204,7 +288,11 @@ static int __sev_do_cmd_locked(int cmd, void *data, int *psp_ret)
 	}
 
 	print_hex_dump_debug("(out): ", DUMP_PREFIX_OFFSET, 16, 2, data,
-			     sev_cmd_buffer_len(cmd), false);
+			     cmd_buf_len, false);
+
+e_free:
+	if (cmd_page)
+		__free_page(cmd_page);
 
 	return ret;
 }
@@ -231,7 +319,7 @@ static int __sev_platform_init_locked(int *error)
 
 	sev = psp->sev_data;
 
-	if (sev->state == SEV_STATE_INIT)
+	if (sev->legacy_inited && (sev->state == SEV_STATE_INIT))
 		return 0;
 
 	if (sev_es_tmr) {
@@ -252,6 +340,7 @@ static int __sev_platform_init_locked(int *error)
 	if (rc)
 		return rc;
 
+	sev->legacy_inited = true;
 	sev->state = SEV_STATE_INIT;
 
 	/* Prepare for first SEV guest launch after INIT */
@@ -286,6 +375,7 @@ static int __sev_platform_shutdown_locked(int *error)
 	if (ret)
 		return ret;
 
+	sev->legacy_inited = false;
 	sev->state = SEV_STATE_UNINIT;
 	dev_dbg(sev->dev, "SEV firmware shutdown\n");
 
