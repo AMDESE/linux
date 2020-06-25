@@ -52,6 +52,8 @@ struct sev_device {
 	u8 api_major;
 	u8 api_minor;
 	u8 build;
+
+	bool snp_inited;
 };
 
 int sev_dev_init(struct psp_device *psp);
