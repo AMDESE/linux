@@ -1929,11 +1929,13 @@ int set_memory_ro(unsigned long addr, int numpages)
 {
 	return change_page_attr_clear(&addr, numpages, __pgprot(_PAGE_RW), 0);
 }
+EXPORT_SYMBOL(set_memory_ro);
 
 int set_memory_rw(unsigned long addr, int numpages)
 {
 	return change_page_attr_set(&addr, numpages, __pgprot(_PAGE_RW), 0);
 }
+EXPORT_SYMBOL(set_memory_rw);
 
 int set_memory_np(unsigned long addr, int numpages)
 {
@@ -1954,6 +1956,7 @@ int set_memory_4k(unsigned long addr, int numpages)
 	return change_page_attr_set_clr(&addr, numpages, __pgprot(0),
 					__pgprot(0), 1, 0, NULL);
 }
+EXPORT_SYMBOL(set_memory_4k);
 
 int set_memory_nonglobal(unsigned long addr, int numpages)
 {
