@@ -185,7 +185,11 @@ static int sev_guest_init(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	if (asid < 0)
 		return ret;
 
-	ret = sev_platform_init(&argp->error);
+	if (sev->snp_active)
+		ret = sev_snp_init(&argp->error);
+	else
+		ret = sev_platform_init(&argp->error);
+
 	if (ret)
 		goto e_free;
 
@@ -208,6 +212,29 @@ static int sev_es_guest_init(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	to_kvm_svm(kvm)->sev_info.es_active = true;
 
 	return sev_guest_init(kvm, argp);
+}
+
+static int sev_snp_guest_init(struct kvm *kvm, struct kvm_sev_cmd *argp)
+{
+	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+	int rc;
+
+	if (!sev_snp)
+		return -ENOTTY;
+
+	sev->es_active = true;
+	sev->snp_active = true;
+
+	rc = sev_guest_init(kvm, argp);
+	if (rc)
+		goto e_done;
+
+	return 0;
+
+e_done:
+	sev->es_active = false;
+	sev->snp_active = false;
+	return rc;
 }
 
 static int sev_bind_asid(struct kvm *kvm, unsigned int handle, int *error)
@@ -998,6 +1025,9 @@ int svm_mem_enc_op(struct kvm *kvm, void __user *argp)
 		break;
 	case KVM_SEV_ES_INIT:
 		r = sev_es_guest_init(kvm, &sev_cmd);
+		break;
+	case KVM_SEV_SNP_INIT:
+		r = sev_snp_guest_init(kvm, &sev_cmd);
 		break;
 	case KVM_SEV_LAUNCH_START:
 		r = sev_launch_start(kvm, &sev_cmd);
