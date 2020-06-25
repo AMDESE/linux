@@ -809,6 +809,80 @@ int sev_guest_df_flush(int *error);
  */
 int sev_guest_decommission(struct sev_data_decommission *data, int *error);
 
+/**
+ * sev_guest_df_flush - perform SNP DF_FLUSH command
+ *
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_guest_snp_df_flush(int *error);
+
+/**
+ * sev_guest_snp_decommission - perform SNP_DECOMMISSION command
+ *
+ * @decommission: sev_data_decommission structure to be processed
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_guest_snp_decommission(struct sev_data_snp_decommission *data, int *error);
+
+/**
+ * sev_snp_reclaim - perform SNP_PAGE_RECLAIM command
+ *
+ * @decommission: sev_snp_page_reclaim structure to be processed
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_snp_reclaim(struct sev_data_snp_page_reclaim *data, int *error);
+
+/**
+ * sev_snp_reclaim - perform SNP_PAGE_UNSMASH command
+ *
+ * @decommission: sev_snp_page_unmash structure to be processed
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_snp_unsmash(unsigned long paddr, int *error);
+
+/**
+ * sev_guest_snp_dbg_decrypt - perform SEV SNP_DBG_DECRYPT command
+ *
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_guest_snp_dbg_decrypt(struct sev_data_snp_dbg *data, int *error);
+
+
 void *psp_copy_user_blob(u64 __user uaddr, u32 len);
 
 #else	/* !CONFIG_CRYPTO_DEV_SP_PSP */
@@ -835,6 +909,17 @@ static inline int
 sev_issue_cmd_external_user(struct file *filep, unsigned int id, void *data, int *error) { return -ENODEV; }
 
 static inline void *psp_copy_user_blob(u64 __user uaddr, u32 len) { return ERR_PTR(-EINVAL); }
+
+static inline int
+sev_guest_snp_decommission(struct sev_data_snp_decommission *data, int *error) { return -ENODEV; }
+
+static inline int sev_guest_snp_df_flush(int *error) { return -ENODEV; }
+
+static inline int sev_snp_reclaim(struct sev_data_snp_page_reclaim *data, int *error) { return -ENODEV; }
+
+static inline int sev_snp_unsmash(unsigned long paddr, int *error) { return -ENODEV; }
+
+static inline int sev_guest_snp_dbg_decrypt(struct sev_data_snp_dbg *data, int *error) { return -ENODEV; }
 
 #endif	/* CONFIG_CRYPTO_DEV_SP_PSP */
 

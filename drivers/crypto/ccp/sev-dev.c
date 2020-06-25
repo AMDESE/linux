@@ -1160,6 +1160,47 @@ int sev_guest_df_flush(int *error)
 }
 EXPORT_SYMBOL_GPL(sev_guest_df_flush);
 
+int sev_guest_snp_decommission(struct sev_data_snp_decommission *data, int *error)
+{
+	return sev_do_cmd(SEV_CMD_SNP_DECOMMISSION, data, error);
+}
+EXPORT_SYMBOL_GPL(sev_guest_snp_decommission);
+
+int sev_guest_snp_df_flush(int *error)
+{
+	return sev_do_cmd(SEV_CMD_SNP_DF_FLUSH, NULL, error);
+}
+EXPORT_SYMBOL_GPL(sev_guest_snp_df_flush);
+
+int sev_snp_reclaim(struct sev_data_snp_page_reclaim *data, int *error)
+{
+	return sev_do_cmd(SEV_CMD_SNP_PAGE_RECLAIM, data, error);
+}
+EXPORT_SYMBOL_GPL(sev_snp_reclaim);
+
+int sev_snp_unsmash(unsigned long paddr, int *error)
+{
+	struct sev_data_snp_page_unsmash *data;
+	int rc;
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL_ACCOUNT);
+	if (!data)
+		return -ENOMEM;
+
+	data->paddr = paddr;
+	rc = sev_do_cmd(SEV_CMD_SNP_PAGE_UNSMASH, data, error);
+
+	kfree(data);
+	return rc;
+}
+EXPORT_SYMBOL_GPL(sev_snp_unsmash);
+
+int sev_guest_snp_dbg_decrypt(struct sev_data_snp_dbg *data, int *error)
+{
+	return sev_do_cmd(SEV_CMD_SNP_DBG_DECRYPT, data, error);
+}
+EXPORT_SYMBOL_GPL(sev_guest_snp_dbg_decrypt);
+
 static void sev_exit(struct kref *ref)
 {
 	misc_deregister(&misc_dev->misc);
