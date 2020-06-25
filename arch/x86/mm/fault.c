@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
 #include <linux/efi.h>			/* efi_recover_from_page_fault()*/
 #include <linux/mm_types.h>
+#include <linux/io.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -145,6 +146,64 @@ is_prefetch(struct pt_regs *regs, unsigned long error_code, unsigned long addr)
 
 DEFINE_SPINLOCK(pgd_lock);
 LIST_HEAD(pgd_list);
+
+static void __show_rmpentry(uint8_t *ptr, unsigned long spa)
+{
+	int i;
+
+	pr_alert("(rmpentry) spa: 0x%lx entry:", spa);
+	for (i = 15; i >= 0; i--)
+		pr_cont("%02hhx", ptr[i]);
+	pr_cont("\n");
+}
+
+static void show_rmpentry(unsigned long spa)
+{
+	u64 rmp_base, rmp_end;
+	void *rmp_table;
+
+	rdmsrl_safe(MSR_AMD64_RMP_BASE, &rmp_base);
+	rdmsrl_safe(MSR_AMD64_RMP_BASE, &rmp_end);
+
+	if (!rmp_base || !rmp_end)
+		return;
+
+	rmp_base += (4 * PAGE_SIZE);
+	rmp_base += 16 * (spa >> PAGE_SHIFT);
+
+	rmp_table = memremap(rmp_base, PAGE_SIZE, MEMREMAP_WB);
+	if (!rmp_table)
+		return;
+
+	__show_rmpentry(rmp_table, spa);
+
+	memunmap(rmp_table);
+}
+
+static void show_rmptable(unsigned long address)
+{
+	unsigned int level;
+	unsigned long spa;
+	pgd_t *pgd;
+	pte_t *pte;
+
+	pgd = __va(read_cr3_pa());
+	pgd += pgd_index(address);
+
+	pte = lookup_address_in_pgd(pgd, address, &level);
+	if (!pte || !pte_present(*pte))
+		return;
+
+	switch (level) {
+	case PG_LEVEL_4K: spa = pte_pfn(*pte) << PAGE_SHIFT; break;
+	case PG_LEVEL_2M: spa = pmd_pfn(*(pmd_t *)pte) << PAGE_SHIFT; break;
+	case PG_LEVEL_1G: spa = pud_pfn(*(pud_t *)pte) << PAGE_SHIFT; break;
+	default: return;
+	}
+
+	show_rmpentry(spa & PMD_MASK);
+	show_rmpentry(spa);
+}
 
 #ifdef CONFIG_X86_32
 static inline pmd_t *vmalloc_sync_one(pgd_t *pgd, unsigned long address)
@@ -681,6 +740,11 @@ show_fault_oops(struct pt_regs *regs, unsigned long error_code, unsigned long ad
 	}
 
 	dump_pagetable(address);
+
+	if (error_code & X86_PF_SNP_RMP) {
+		show_rmptable(address);
+	}
+
 }
 
 static noinline void
