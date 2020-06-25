@@ -25,6 +25,7 @@
 #include <linux/pagemap.h>
 #include <linux/swap.h>
 #include <linux/rwsem.h>
+#include <linux/set_memory.h>
 
 #include <asm/apic.h>
 #include <asm/perf_event.h>
@@ -1221,6 +1222,11 @@ static int svm_create_vcpu(struct kvm_vcpu *vcpu)
 		vmsa_page = alloc_page(GFP_KERNEL);
 		if (!vmsa_page)
 			goto free_page4;
+
+		if (sev_snp_guest(svm->vcpu.kvm)) {
+			if (set_memory_4k((unsigned long)page_address(vmsa_page), 1))
+				goto free_page5;
+		}
 	}
 
 	err = avic_init_vcpu(svm);
@@ -1288,6 +1294,7 @@ static void svm_clear_current_vmcb(struct vmcb *vmcb)
 static void svm_free_vcpu(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
+	struct rmpupdate_entry e = {};
 
 	/*
 	 * The vmcb page can be recycled, causing a false negative in
@@ -1312,6 +1319,14 @@ static void svm_free_vcpu(struct kvm_vcpu *vcpu)
 			page_to_flush = (u64)svm->vmsa | sev->asid;
 			wrmsrl(MSR_AMD64_VM_PAGE_FLUSH, page_to_flush);
 		}
+
+		/*
+		 * If this is SNP guest then VMSA was added in the RMP table,
+		 * be sure to remove it from the RMP table before returning
+		 * the page back to the system.
+		 */
+		if (sev_snp_guest(vcpu->kvm))
+			snp_rmpupdate_set(__pa(svm->vmsa), &e);
 
 		__free_page(virt_to_page(svm->vmsa));
 
