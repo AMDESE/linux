@@ -5881,6 +5881,8 @@ void kvm_zap_gfn_range(struct kvm *kvm, gfn_t gfn_start, gfn_t gfn_end)
 	spin_unlock(&kvm->mmu_lock);
 }
 
+EXPORT_SYMBOL_GPL(kvm_zap_gfn_range);
+
 static bool slot_rmap_write_protect(struct kvm *kvm,
 				    struct kvm_rmap_head *rmap_head)
 {

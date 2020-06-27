@@ -20,10 +20,15 @@
 
 #include <asm/trap_defs.h>
 #include <asm/fpu/internal.h>
+#include <asm/sev-es.h>
 
 #include "x86.h"
 #include "svm.h"
 #include "trace.h"
+
+#define RMP_KVM_PG_LEVEL(x)	((x == RMP_PG_SIZE_4K) ? PT_PAGE_TABLE_LEVEL : PT_DIRECTORY_LEVEL)
+#define KVM_RMP_PG_LEVEL(x)	((x == PT_PAGE_TABLE_LEVEL) ? RMP_PG_SIZE_4K : RMP_PG_SIZE_2M)
+#define KVM_PAGES_PER_LEVEL(x)	((x == PT_DIRECTORY_LEVEL) ? PTRS_PER_PMD : 1)
 
 static u8 sev_enc_bit;
 static int sev_flush_asids(void);
@@ -1606,12 +1611,18 @@ static void __unregister_enc_region_locked(struct kvm *kvm,
 {
 	unsigned long i, spa;
 	struct rmpupdate_entry e = {};
+	struct rmpupdate_entry large = {};
 
 	/* On SNP, make the region as a hypervisor page */
 	if (sev_snp_guest(kvm)) {
+		large.pagesize = RMP_PG_SIZE_2M;
+
 		for (i = 0; i < region->npages; i++) {;
 			spa = page_to_pfn(region->pages[i]) << PAGE_SHIFT;
-			snp_rmpupdate_set(spa, &e);
+			if (is_large_rmpentry(kvm, spa))
+				snp_rmpupdate_set(spa & PMD_MASK, &large);
+			else
+				snp_rmpupdate_set(spa, &e);
 		}
 	}
 
@@ -1707,6 +1718,9 @@ void sev_vm_destroy(struct kvm *kvm)
 		list_for_each_safe(pos, q, head) {
 			__unregister_enc_region_locked(kvm,
 				list_entry(pos, struct enc_region, list));
+
+			if (need_resched())
+				schedule();
 		}
 	}
 
@@ -1993,6 +2007,327 @@ static void set_ghcb_msr(struct vcpu_svm *svm, u64 value)
 	svm->vmcb->control.ghcb_gpa = value;
 }
 
+static int gfn_to_spa(struct kvm_vcpu *vcpu, gfn_t gfn, int *level, u64 *spa)
+{
+	struct kvm_memory_slot *slot;
+	unsigned long hva;
+	pte_t *pte;
+
+	slot = gfn_to_memslot(vcpu->kvm, gfn);
+	if (!slot || slot->flags & KVM_MEMSLOT_INVALID)
+		return 1;
+
+	/*
+	 * Note, using the already-retrieved memslot and __gfn_to_hva_memslot()
+	 * is not solely for performance, it's also necessary to avoid the
+	 * "writable" check in __gfn_to_hva_many(), which will always fail on
+	 * read-only memslots due to gfn_to_hva() assuming writes. In this
+	 * case we are not writing to the page, we just want to get the
+	 * system physical address of the gfn.
+	 */
+	hva = __gfn_to_hva_memslot(slot, gfn);
+
+	pte = lookup_address_in_mm(vcpu->kvm->mm, hva, level);
+	if (unlikely(!pte))
+		return 1;
+
+	switch (*level) {
+	case PG_LEVEL_4K: *spa = pte_pfn(*pte) << PAGE_SHIFT; break;
+	case PG_LEVEL_2M: *spa = pmd_pfn(*(pmd_t*)pte) << PAGE_SHIFT; break;
+	case PG_LEVEL_1G: *spa = pud_pfn(*(pud_t*)pte) << PAGE_SHIFT; break;
+	default: return 1;
+	}
+
+	if (*level > PG_LEVEL_4K) {
+		u64 mask;
+
+		mask = KVM_PAGES_PER_HPAGE(*level) - KVM_PAGES_PER_HPAGE(*level - 1);
+		*spa |= (gfn & mask) << PAGE_SHIFT;
+	}
+
+	return 0;
+}
+
+static int snp_page_psmash(struct kvm_vcpu *vcpu, gpa_t gpa, u64 spa)
+{
+	gfn_t gfn_start, gfn_end;
+	int rc;
+
+	gfn_start = gpa_to_gfn(gpa) & ~(KVM_PAGES_PER_HPAGE(PT_DIRECTORY_LEVEL) - 1);
+	gfn_end = gfn_start + PTRS_PER_PMD;
+	kvm_zap_gfn_range(vcpu->kvm, gfn_start, gfn_end);
+
+	rc = snp_psmash(spa & PMD_MASK);
+	if (rc)
+		return rc;
+
+	return 0;
+}
+
+static int snp_page_shared(struct kvm_vcpu *vcpu, gpa_t gpa, int level)
+{
+	struct rmpupdate_entry e = {};
+	int rc, host_level;
+	u64 spa;
+
+	rc = gfn_to_spa(vcpu, gpa_to_gfn(gpa), &host_level, &spa);
+	if (rc)
+		return rc;
+
+	/*
+	 * If requested level is 4K but the page is added as a 2MB in RMP table then psmash before
+	 * making the page shared.
+	 */
+	if ((level == PT_PAGE_TABLE_LEVEL) && is_large_rmpentry(vcpu->kvm, spa)) {
+		rc = snp_page_psmash(vcpu, gpa, spa);
+		if (rc)
+			goto e_fail;
+	}
+
+	e.pagesize = KVM_RMP_PG_LEVEL(level);
+	rc = snp_rmpupdate_set(spa, &e);
+
+e_fail:
+	return rc;
+}
+
+static int snp_rmpupdate_set_range(struct kvm_vcpu *vcpu, u64 spa, gfn_t gfn,
+				   unsigned long npages, struct rmpupdate_entry *e)
+{
+	int rc;
+
+	while (npages--) {
+		/* Drop the NPT */
+		kvm_zap_gfn_range(vcpu->kvm, gfn, gfn + 1);
+
+		/* Update the RMP table */
+		rc = snp_rmpupdate_set(spa, e);
+		if (rc) {
+			pr_err("SNP: failed spa 0x%llx rc %d\n", spa, rc);
+			return rc;
+		}
+
+		spa += PAGE_SIZE;
+		gfn++;
+	}
+
+	return 0;
+}
+
+#define RMPUPDATE_FAIL_OVERLAP		4
+
+static int __snp_page_private(struct kvm_vcpu *vcpu, gpa_t gpa, u64 spa, int level)
+{
+	struct kvm_sev_info *sev = &to_kvm_svm(vcpu->kvm)->sev_info;
+	struct rmpupdate_entry e = {};
+	gfn_t gfn_base;
+	int rc, retry = 1;
+
+	/* Drop the existing NPT as we are going to change the RMP table */
+	gfn_base = gpa_to_gfn(gpa);
+	kvm_zap_gfn_range(vcpu->kvm, gfn_base, gfn_base + KVM_PAGES_PER_LEVEL(level));
+
+again:
+	/* Update the RMP table to make the page private */
+	e.asid = sev->asid;
+	e.gpa = gpa;
+	e.pagesize = KVM_RMP_PG_LEVEL(level);
+	e.assigned = 1;
+
+	rc = snp_rmpupdate_set(spa, &e);
+
+	/* If we get an overlap failure then handle it */
+	if (retry && (rc == RMPUPDATE_FAIL_OVERLAP)) {
+		trace_printk("overlap detected requested level %d spa 0x%llx gpa 0x%llx\n",
+				level, spa, gpa);
+		/*
+		 * Case 1:
+		 *  Requested level is 2MB but it overlaps with exiting 4K pages.
+		 *  Make the 2MB as a hypervisor page and retry.
+		 */
+		if (level == PT_DIRECTORY_LEVEL) {
+			gfn_base = gpa_to_gfn(gpa) & ~(KVM_PAGES_PER_HPAGE(PT_DIRECTORY_LEVEL) - 1);
+
+			memset(&e, 0, sizeof(struct rmpupdate_entry));
+			rc = snp_rmpupdate_set_range(vcpu, spa & PMD_MASK, gfn_base, PTRS_PER_PMD, &e);
+			if (rc)
+				goto e_fail;
+		}
+
+		/*
+		 * Case 2:
+		 *   Requested level is 4K but it overlaps with existing 2MB
+		 *   page. Use the psmash command to split the large page into
+		 *   smaller pages.
+		 */
+		if (level == PT_PAGE_TABLE_LEVEL) {
+			rc = snp_page_psmash(vcpu, gpa, spa);
+			if (rc) {
+				pr_err("SNP: failed to psmash spa 0x%llx\n", spa & PMD_MASK);
+				goto e_fail;
+			}
+		}
+
+		retry--;
+		goto again;
+	}
+
+e_fail:
+	return rc;
+}
+
+static int snp_page_private(struct kvm_vcpu *vcpu, gpa_t gpa, int level)
+{
+	unsigned long npages, vaddr;
+	gpa_t gpa_end, gpa_start;
+	int rc, host_level;
+	u64 spa;
+
+	gpa_start = gpa;
+	gpa_end = gpa + page_level_size(level);
+
+	for (gpa = gpa_start; gpa < gpa_end; gpa += page_level_size(level)) {
+		rc = gfn_to_spa(vcpu, gpa_to_gfn(gpa), &host_level, &spa);
+		if (rc)
+			return rc;
+
+		/* If request level is greater than host level then use the host level */
+		if (level > host_level)
+			level = host_level;
+
+		/*
+		 * HACK: a native page walk for this spa may cause a RMP violation if this
+		 * page is accessed by host kernel with a different page size map. For now
+		 * lets split the physmap for this spa range into 4K so that we never
+		 * encounter this case.
+		 */
+		vaddr = (unsigned long)__va(spa);
+		npages = page_level_size(level) >> PAGE_SHIFT;
+		if (set_memory_4k(vaddr, npages)) {
+			pr_err("SNP: failed to split vaddr 0x%lx pages %ld\n", vaddr, npages);
+			return -EINVAL;
+		}
+
+		trace_printk("vcpu %d private gpa 0x%llx spa 0x%llx level %d\n", vcpu->vcpu_id, gpa, spa, level);
+		rc = __snp_page_private(vcpu, gpa, spa, level);
+		if (rc)
+			return rc;
+	}
+
+	return 0;
+}
+
+static int handle_snp_mem_op_proto(struct kvm_vcpu *vcpu, gfn_t gfn, unsigned int npages,
+				   int rmp_pagesize, int mode)
+{
+	struct kvm *kvm = vcpu->kvm;
+	gpa_t gpa, gpa_end;
+	unsigned int level;
+	int rc;
+
+	level = RMP_KVM_PG_LEVEL(rmp_pagesize);
+	gpa = gfn_to_gpa(gfn);
+	gpa_end = gpa + (npages * page_level_size(level));
+
+	trace_printk("mode %d gpa 0x%llx - 0x%llx level %d\n", mode, gpa, gpa_end, level);
+
+	mutex_lock(&kvm->lock);
+
+	if (mode == MEM_OP_SNP_SHARED)
+		rc = snp_page_shared(vcpu, gpa, level);
+	else
+		rc = snp_page_private(vcpu, gpa, level);
+
+	if (rc) {
+		pr_err("SNP: failed to update RMP entry mode=%s gpa=0x%llx level %d"
+			" error_code=%d\n", mode == MEM_OP_SNP_SHARED ? "shared" : "private",
+			gpa, level, rc);
+	}
+
+	mutex_unlock(&kvm->lock);
+	return rc;
+}
+
+static int __handle_snp_mem_op(struct kvm_vcpu *vcpu, struct vmgexit_mem_op *entry)
+{
+	gpa_t gpa, gpa_end, next_gpa;
+	unsigned int i = 0, rc, level;
+	struct kvm *kvm = vcpu->kvm;
+
+	level = RMP_KVM_PG_LEVEL(entry->rmp_pagesize);
+	gpa = gfn_to_gpa(entry->gfn);
+	gpa_end = gpa + (entry->npages * page_level_size(level));
+
+	trace_printk("mode %d gpa 0x%llx - 0x%llx level %d\n", entry->cmd, gpa, gpa_end, level);
+
+	mutex_lock(&kvm->lock);
+
+	for (; gpa < gpa_end; gpa = next_gpa, i++) {
+
+		if (entry->cmd == MEM_OP_SNP_SHARED)
+			rc = snp_page_shared(vcpu, gpa, level);
+		else
+			rc = snp_page_private(vcpu, gpa, level);
+
+		if (rc) {
+			pr_err("SNP: failed to update RMP entry mode=%d gpa=0x%llx level %d"
+				" error_code=%d\n", entry->cmd, gpa, level, rc);
+			break;
+		}
+
+		if (need_resched())
+			schedule();
+
+		entry->npages--;
+		next_gpa = gpa + page_level_size(level);
+	}
+
+	mutex_unlock(&kvm->lock);
+	return 0;
+}
+
+static int handle_snp_mem_op(struct vcpu_svm *svm, uint8_t *data)
+{
+	struct kvm_vcpu *vcpu = &svm->vcpu;
+	struct vmgexit_mem_op_hdr *hdr;
+	struct vmgexit_mem_op *entry;
+	unsigned int i, nentries;
+
+	if (!sev_snp_guest(vcpu->kvm))
+		return -EINVAL;
+
+	hdr = (struct vmgexit_mem_op_hdr *)data;
+	entry = (struct vmgexit_mem_op *)(data + sizeof(*hdr));
+	nentries = hdr->count;
+
+	if (nentries == 0) {
+		pr_err("snp_mem_op: no entries are provided.\n");
+		return -EINVAL;
+	}
+
+	for (i = 0; i < nentries; i++) {
+		int ret;
+
+		ret = __handle_snp_mem_op(vcpu, entry);
+		if (ret < 0) {
+			pr_err("snp_mem_op: failed to handle gfn 0x%llx pages %u level %u mode %u\n",
+					(u64)entry->gfn, entry->npages, RMP_KVM_PG_LEVEL(entry->rmp_pagesize),
+					entry->cmd);
+			return -EINVAL;
+		}
+
+		entry->npages -= ret;
+
+		/* if all the pages in the entry is done then decrement the count */
+		if (!entry->npages)
+			hdr->count--;
+
+		entry++;
+	}
+
+	return 0;
+}
+
 static int sev_handle_vmgexit_msr_protocol(struct vcpu_svm *svm)
 {
 	struct vmcb_control_area *control = &svm->vmcb->control;
@@ -2046,6 +2381,20 @@ static int sev_handle_vmgexit_msr_protocol(struct vcpu_svm *svm)
 		set_ghcb_msr_bits(svm, GHCB_MSR_CPUID_RESP,
 				  GHCB_MSR_INFO_MASK,
 				  GHCB_MSR_INFO_POS);
+		break;
+	}
+	case GHCB_MSR_SNP_MEM_OP_SHARED_REQ: {
+		handle_snp_mem_op_proto(&svm->vcpu,
+				GHCB_SNP_MEM_OP_GFN(control->ghcb_gpa), 1,
+				GHCB_SNP_MEM_OP_PAGE_SIZE(control->ghcb_gpa),
+				MEM_OP_SNP_SHARED);
+		break;
+	}
+	case GHCB_MSR_SNP_MEM_OP_PRIVATE_REQ: {
+		handle_snp_mem_op_proto(&svm->vcpu,
+				GHCB_SNP_MEM_OP_GFN(control->ghcb_gpa), 1,
+				GHCB_SNP_MEM_OP_PAGE_SIZE(control->ghcb_gpa),
+				MEM_OP_SNP_PRIVATE);
 		break;
 	}
 	case GHCB_MSR_TERM_REQ: {
@@ -2164,6 +2513,15 @@ int sev_handle_vmgexit(struct vcpu_svm *svm)
 		       control->exit_info_1,
 		       control->exit_info_2);
 		break;
+	case SVM_VMGEXIT_SNP_MEM_OP: {
+		if (!setup_vmgexit_scratch(svm, true, sizeof(ghcb->save.sw_scratch)))
+			break;
+
+		handle_snp_mem_op(svm, svm->ghcb_sa);
+
+		ret = 1;
+		break;
+	}
 	default:
 		ret = svm_invoke_exit_handler(svm, ghcb_get_sw_exit_code(ghcb));
 	}
@@ -2312,4 +2670,41 @@ void svm_rmp_level_adjust(struct kvm_vcpu *vcpu, gfn_t gfn, kvm_pfn_t *pfnp,
 		*max_level = PT_PAGE_TABLE_LEVEL;
 
 	*allow_prefetch = false;
+}
+
+int sev_handle_rmp_fault(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code)
+{
+	struct kvm *kvm = vcpu->kvm;
+	int rc = 0, level;
+	u64 spa;
+
+	if (!sev_snp_guest(vcpu->kvm))
+		return 1;
+
+	if (!(error_code & X86_PF_SNP_RMP))
+		return 1;
+
+	rc = gfn_to_spa(vcpu, gpa_to_gfn(gpa), &level, &spa);
+	if (rc)
+		return rc;
+
+	trace_printk("gpa 0x%llx spa 0x%llx error code 0x%llx\n", gpa, spa, error_code);
+
+	mutex_lock(&kvm->lock);
+
+	/* Handle the size mismatch fault */
+	if (error_code & X86_PF_SNP_SZ) {
+		/*
+		 * If the gpa is part of large RMP entry then size match was due to guest attempting to
+		 * pvalidate this GPA as a 4K page. PSMASH the RMP entry into 4K and resume the guest.
+		 */
+		if (is_large_rmpentry(vcpu->kvm, spa)) {
+			rc = snp_page_psmash(vcpu, gpa, spa);
+			goto unlock;
+		}
+	}
+
+unlock:
+	mutex_unlock(&kvm->lock);
+	return rc;
 }

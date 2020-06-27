@@ -57,6 +57,23 @@ struct es_fault_info {
 	unsigned long cr2;
 };
 
+struct vmgexit_mem_op_hdr {
+	uint64_t count	: 32;
+	uint64_t rsvd	: 32;
+};
+
+struct vmgexit_mem_op {
+	uint64_t npages		: 12;
+	uint64_t gfn		: 40;
+
+#define MEM_OP_SNP_SHARED		0x1
+#define MEM_OP_SNP_PRIVATE		0x2
+
+	uint64_t cmd		: 3;
+	uint64_t rsvd		: 8;
+	uint64_t rmp_pagesize	: 1;
+};
+
 struct pt_regs;
 
 /* ES instruction emulation context */
