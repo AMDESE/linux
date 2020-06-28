@@ -4266,6 +4266,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		.pgoff = linear_page_index(vma, address),
 		.gfp_mask = __get_fault_gfp_mask(vma),
 	};
+	unsigned int rmp_fault = flags & FAULT_FLAG_RMP;
 	unsigned int dirty = flags & FAULT_FLAG_WRITE;
 	struct mm_struct *mm = vma->vm_mm;
 	pgd_t *pgd;
@@ -4298,6 +4299,12 @@ retry_pud:
 				if (!(ret & VM_FAULT_FALLBACK))
 					return ret;
 			} else {
+				/* If fault was a RMP violation then split the page */
+				if (rmp_fault) {
+					__split_huge_pud(vmf.vma, vmf.pud, vmf.address);
+					return 0;
+				}
+
 				huge_pud_set_accessed(&vmf, orig_pud);
 				return 0;
 			}
@@ -4336,11 +4343,21 @@ retry_pud:
 				if (!(ret & VM_FAULT_FALLBACK))
 					return ret;
 			} else {
+				/* If fault was a RMP violation then split the large page */
+				if (rmp_fault) {
+					__split_huge_pmd(vmf.vma, vmf.pmd, vmf.address, false, NULL);
+					return 0;
+				}
+
 				huge_pmd_set_accessed(&vmf, orig_pmd);
 				return 0;
 			}
 		}
 	}
+
+	/* If the RMP fault was not due to the large page then return an error */
+	if (rmp_fault)
+		return VM_FAULT_SIGSEGV;
 
 	return handle_pte_fault(&vmf);
 }
