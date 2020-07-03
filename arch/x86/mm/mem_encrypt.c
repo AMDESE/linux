@@ -459,6 +459,10 @@ static void print_mem_encrypt_feature_info(void)
 	if (sev_es_active())
 		pr_cont(" SEV-ES");
 
+	/* Secure Nested Paging */
+	if (sev_snp_active())
+		pr_cont(" SEV-SNP");
+
 	pr_cont("\n");
 }
 
