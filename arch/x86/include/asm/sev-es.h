@@ -32,6 +32,16 @@
 #define GHCB_DEFAULT_USAGE	0x0000UL
 
 #define GHCB_SEV_CPUID_RESP	0x005UL
+
+#define GHCB_SNP_MEM_OP_PRIVATE_REQ  0x006UL
+#define GHCB_MEM_OP_PRIVATE_REQ(gfn, psize) (GHCB_SNP_MEM_OP_PRIVATE_REQ |\
+				     ((unsigned long)gfn << 12) | \
+				     ((unsigned long)psize << 63))
+#define GHCB_SNP_MEM_OP_SHARED_REQ  0x007UL
+#define GHCB_MEM_OP_SHARED_REQ(gfn, psize) (GHCB_SNP_MEM_OP_SHARED_REQ |\
+				     ((unsigned long)gfn << 12) | \
+				     ((unsigned long)psize << 63))
+
 #define GHCB_SEV_TERMINATE	0x100UL
 #define		GHCB_SEV_TERMINATE_REASON(reason_set, reason_val)	\
 			(((((u64)reason_set) &  0x7) << 12) |		\

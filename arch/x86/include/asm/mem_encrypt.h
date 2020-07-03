@@ -71,6 +71,17 @@ static inline int snp_psmash(u64 spa)
 	return ret;
 }
 
+static inline int asm_pvalidate(unsigned long vaddr, int psize, int validate)
+{
+	int rc;
+
+	asm volatile(".byte 0xF2,0x0F,0x01,0xFF\n"
+		: "=a"(rc)
+		: "a"(vaddr), "c"(psize), "d"(validate) : "memory");
+
+	return rc;
+}
+
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 
 extern u64 sme_me_mask;

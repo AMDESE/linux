@@ -22,6 +22,8 @@
 
 #include "error.h"
 
+#include "../../kernel/sev-snp-shared.c"
+
 struct ghcb boot_ghcb_page __aligned(PAGE_SIZE);
 struct ghcb *boot_ghcb;
 
@@ -128,6 +130,11 @@ static bool sev_es_setup_ghcb(void)
 	if (set_page_decrypted((unsigned long)&boot_ghcb_page))
 		return false;
 
+	/* If SNP is enabled then make the GHCB as a shared page before it gets touched */
+	if (sev_snp_enabled() &&
+	    sev_snp_set_memory_shared((unsigned long)&boot_ghcb_page, PAGE_SIZE))
+		return false;
+
 	/* Page is now mapped decrypted, clear it */
 	memset(&boot_ghcb_page, 0, sizeof(boot_ghcb_page));
 
@@ -152,6 +159,10 @@ void sev_es_shutdown_ghcb(void)
 	if (set_page_encrypted((unsigned long)&boot_ghcb_page))
 		error("Can't map GHCB page encrypted");
 
+	/* The GHCB page is no longer mapped as a shared in the page table */
+	if (sev_snp_enabled() &&
+	    sev_snp_set_memory_private((unsigned long)&boot_ghcb_page, PAGE_SIZE))
+		error("Can't mark the GHCB page private");
 	/*
 	 * GHCB page is mapped encrypted again and flushed from the cache.
 	 * Mark it non-present now to catch bugs when #VC exceptions trigger
