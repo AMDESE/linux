@@ -2001,6 +2001,14 @@ static int __set_memory_enc_dec(unsigned long addr, int numpages, bool enc)
 
 	ret = __change_page_attr_set_clr(&cpa, 1);
 
+	/* if SNP is enabled then change the page state */
+	if (!ret && sev_snp_active()) {
+		if (enc)
+			ret = snp_set_memory_private(addr, numpages);
+		else
+			ret = snp_set_memory_shared(addr, numpages);
+	}
+
 	/*
 	 * After changing the encryption attribute, we need to flush TLBs again
 	 * in case any speculative TLB caching occurred (but no need to flush

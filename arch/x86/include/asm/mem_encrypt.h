@@ -110,6 +110,9 @@ void __init sme_enable(struct boot_params *bp);
 int __init early_set_memory_decrypted(unsigned long vaddr, unsigned long size);
 int __init early_set_memory_encrypted(unsigned long vaddr, unsigned long size);
 
+int __init early_snp_set_memory_shared(unsigned long paddr, unsigned int npages);
+int __init early_snp_set_memory_private(unsigned long paddr, unsigned int npages);
+
 /* Architecture __weak replacement functions */
 void __init mem_encrypt_init(void);
 void __init mem_encrypt_free_decrypted_mem(void);
@@ -119,6 +122,9 @@ bool sme_active(void);
 bool sev_active(void);
 bool sev_es_active(void);
 bool sev_snp_active(void);
+
+int snp_set_memory_private(unsigned long vaddr, unsigned int npages);
+int snp_set_memory_shared(unsigned long vaddr, unsigned int npages);
 
 #define __bss_decrypted __attribute__((__section__(".bss..decrypted")))
 
@@ -149,6 +155,16 @@ static inline int __init
 early_set_memory_decrypted(unsigned long vaddr, unsigned long size) { return 0; }
 static inline int __init
 early_set_memory_encrypted(unsigned long vaddr, unsigned long size) { return 0; }
+
+static inline int __init
+early_snp_set_memory_private(unsigned long paddr, unsigned int npages) { return 0; }
+static inline int __init
+early_snp_set_memory_shared(unsigned long paddr, unsigned int npages) { return 0; }
+
+static inline int
+snp_set_memory_private(unsigned long paddr, unsigned int npages) { return 0; }
+static inline int
+snp_set_memory_shared(unsigned long paddr, unsigned int npages) { return 0; }
 
 #define __bss_decrypted
 

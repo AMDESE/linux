@@ -48,6 +48,18 @@ bool sev_enabled __section(.data);
 /* Buffer used for early in-place encryption by BSP, no locking needed */
 static char sme_early_buffer[PAGE_SIZE] __initdata __aligned(PAGE_SIZE);
 
+static void __init snp_memremap_private_shared(unsigned long paddr,
+					       unsigned long size, bool priv)
+{
+	if (!sev_snp_active())
+		return;
+
+	if (priv)
+		early_snp_set_memory_private(paddr, PAGE_ALIGN(size) >> PAGE_SHIFT);
+	else
+		early_snp_set_memory_shared(paddr, PAGE_ALIGN(size) >> PAGE_SHIFT);
+}
+
 /*
  * This routine does not change the underlying encryption setting of the
  * page(s) that map this memory. It assumes that eventually the memory is
@@ -96,11 +108,16 @@ static void __init __sme_early_enc_dec(resource_size_t paddr,
 		 * Use a temporary buffer, of cache-line multiple size, to
 		 * avoid data corruption as documented in the APM.
 		 */
+		snp_memremap_private_shared(paddr, len, !enc);
 		memcpy(sme_early_buffer, src, len);
+
+		snp_memremap_private_shared(paddr, len, enc);
 		memcpy(dst, sme_early_buffer, len);
 
 		early_memunmap(dst, len);
 		early_memunmap(src, len);
+
+		snp_memremap_private_shared(paddr, len, true);
 
 		paddr += len;
 		size -= len;
@@ -246,9 +263,15 @@ static void __init __set_clr_pte_enc(pte_t *kpte, int level, bool enc)
 	else
 		sme_early_decrypt(pa, size);
 
+	if (!enc && sev_snp_active())
+		early_snp_set_memory_shared(pa, 1);
+
 	/* Change the page encryption mask. */
 	new_pte = pfn_pte(pfn, new_prot);
 	set_pte_atomic(kpte, new_pte);
+
+	if (enc && sev_snp_active())
+		early_snp_set_memory_private(pa, 1);
 }
 
 static int __init early_set_memory_enc_dec(unsigned long vaddr,
