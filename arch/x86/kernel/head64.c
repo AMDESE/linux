@@ -40,6 +40,9 @@
 #include <asm/trap_defs.h>
 #include <asm/sev-es.h>
 
+/* Provides sev_snp_set_memory_shared() */
+#include "sev-snp-shared.c"
+
 /*
  * Manage page tables very early on.
  */
@@ -272,6 +275,9 @@ unsigned long __head __startup_64(unsigned long physaddr,
 		for (; vaddr < vaddr_end; vaddr += PMD_SIZE) {
 			i = pmd_index(vaddr);
 			pmd[i] -= sme_get_me_mask();
+
+			/* Make the memory range shared */
+			sev_snp_set_memory_shared(pmd[i] & ~pgtable_flags, PMD_SIZE);
 		}
 	}
 
