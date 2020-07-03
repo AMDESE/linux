@@ -21,6 +21,7 @@
 #include <asm/sections.h>
 #include <asm/io.h>
 #include <asm/setup_arch.h>
+#include <asm/mem_encrypt.h>
 
 static struct resource system_rom_resource = {
 	.name	= "System ROM",
@@ -201,6 +202,10 @@ void __init probe_roms(void)
 	unsigned long start, length, upper;
 	unsigned char c;
 	int i;
+
+	/* TODO: UEFI should validate the legacy BIOS region */
+	if (sev_snp_active())
+		early_snp_set_memory_private(0xc0000, 64);
 
 	/* video rom */
 	upper = adapter_rom_resources[0].start;
