@@ -351,6 +351,11 @@ bool sev_active(void)
 	return !!(sev_status & MSR_AMD64_SEV_ENABLED);
 }
 
+bool sev_snp_active(void)
+{
+	return !!(sev_status & MSR_AMD64_SEV_SNP_ENABLED);
+}
+
 bool sev_es_active(void)
 {
 	return !!(sev_status & MSR_AMD64_SEV_ES_ENABLED);
