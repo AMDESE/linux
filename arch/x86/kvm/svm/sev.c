@@ -54,6 +54,10 @@ struct enc_region {
 	unsigned long size;
 };
 
+/* enable/disable VMCB dump debug support */
+static int dump_all_vmcbs = false;
+module_param(dump_all_vmcbs, int, 0644);
+
 static int sev_flush_asids(void)
 {
 	int ret, error = 0;
@@ -1050,7 +1054,7 @@ static void snp_print_rmpentry(u64 spa)
 	pr_cont("\n");
 }
 
-static int snp_page_reclaim(unsigned long spa)
+int snp_page_reclaim(unsigned long spa)
 {
 	struct sev_data_snp_page_reclaim *data;
 	struct rmpupdate_entry e = {};
@@ -1700,6 +1704,17 @@ void sev_vm_destroy(struct kvm *kvm)
 
 	if (!sev_guest(kvm))
 		return;
+
+	if (dump_all_vmcbs) {
+		unsigned int i;
+
+		for (i = 0; i < kvm->created_vcpus; i++) {
+			struct kvm_vcpu *vcpu = kvm->vcpus[i];
+
+			printk("*** DEBUG: %s:%u:%s - vcpu%u before destroy\n", __FILE__, __LINE__, __func__, vcpu->vcpu_id);
+			dump_vmcb(vcpu);
+		}
+	}
 
 	mutex_lock(&kvm->lock);
 
@@ -2672,11 +2687,15 @@ void svm_rmp_level_adjust(struct kvm_vcpu *vcpu, gfn_t gfn, kvm_pfn_t *pfnp,
 	*allow_prefetch = false;
 }
 
-int sev_handle_rmp_fault(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code)
+int sev_handle_rmp_fault(struct vcpu_svm *svm, gpa_t gpa, u64 error_code)
 {
+	pgd_t *nested_pgd = (pgd_t *)__va(svm->vmcb->control.nested_cr3);
+	int rc = 0, level, npt_level = -1, rmp_level;
+	struct kvm_vcpu *vcpu = &svm->vcpu;
 	struct kvm *kvm = vcpu->kvm;
-	int rc = 0, level;
-	u64 spa;
+	struct rmp_entry e;
+	u64 spa, npt_spa;
+	pte_t *pte;
 
 	if (!sev_snp_guest(vcpu->kvm))
 		return 1;
@@ -2689,6 +2708,17 @@ int sev_handle_rmp_fault(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code)
 		return rc;
 
 	trace_printk("gpa 0x%llx spa 0x%llx error code 0x%llx\n", gpa, spa, error_code);
+
+	/* walk the NPT and RMP table to print the page size */
+	npt_spa = 0;
+	pte = lookup_address_in_pgd(nested_pgd, gpa, &npt_level);
+	if (pte && !pte_none(*pte))
+		npt_spa = pte_pfn(*pte) << PAGE_SHIFT;
+
+	snp_read_rmpentry(spa, &e);
+	rmp_level = is_large_rmpentry(vcpu->kvm, spa);
+	trace_printk("npt_level %d npt_spa 0x%llx rmp_level %d (%llx%llx)\n",
+			npt_level, npt_spa, rmp_level, e.high, e.low);
 
 	mutex_lock(&kvm->lock);
 

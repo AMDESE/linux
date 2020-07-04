@@ -608,6 +608,7 @@ pte_t *lookup_address_in_pgd(pgd_t *pgd, unsigned long address,
 	return pte_offset_kernel(pmd, address);
 }
 
+EXPORT_SYMBOL_GPL(lookup_address_in_pgd);
 /*
  * Lookup the page table entry for a virtual address. Return a pointer
  * to the entry and the level of the mapping.

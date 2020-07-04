@@ -603,7 +603,9 @@ void sev_es_vcpu_load(struct vcpu_svm *svm, int cpu);
 void sev_es_vcpu_put(struct vcpu_svm *svm);
 void svm_rmp_level_adjust(struct kvm_vcpu *vcpu, gfn_t gfn, kvm_pfn_t *pfnp,
 			  int *max_level, bool *allow_prefetch);
-int sev_handle_rmp_fault(struct kvm_vcpu *vcpu, gpa_t gpa, u64 error_code);
+int sev_handle_rmp_fault(struct vcpu_svm *svm, gpa_t gpa, u64 error_code);
+int snp_page_reclaim(unsigned long spa);
+void dump_vmcb(struct kvm_vcpu *vcpu);
 
 /* vmenter.S */
 

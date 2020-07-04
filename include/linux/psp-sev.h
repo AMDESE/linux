@@ -882,6 +882,20 @@ int sev_snp_unsmash(unsigned long paddr, int *error);
  */
 int sev_guest_snp_dbg_decrypt(struct sev_data_snp_dbg *data, int *error);
 
+/**
+ * sev_guest_dbg_decrypt - perform SEV DBG_DECRYPT command
+ *
+ * @sev_ret: sev command return code
+ *
+ * Returns:
+ * 0 if the sev successfully processed the command
+ * -%ENODEV    if the sev device is not available
+ * -%ENOTSUPP  if the sev does not support SEV
+ * -%ETIMEDOUT if the sev command timed out
+ * -%EIO       if the sev returned a non-zero return code
+ */
+int sev_guest_dbg_decrypt(struct sev_data_dbg *data, int *error);
+
 
 void *psp_copy_user_blob(u64 __user uaddr, u32 len);
 

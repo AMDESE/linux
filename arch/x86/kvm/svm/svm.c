@@ -1832,7 +1832,7 @@ static int npf_interception(struct vcpu_svm *svm)
 
 	/* If its RMP violation then handle it */
 	if (error_code & X86_PF_SNP_RMP)
-		return sev_handle_rmp_fault(&svm->vcpu, fault_address, error_code);
+		return sev_handle_rmp_fault(svm, fault_address, error_code);
 
 	return kvm_mmu_page_fault(&svm->vcpu, fault_address, error_code,
 			static_cpu_has(X86_FEATURE_DECODEASSISTS) ?
@@ -2987,7 +2987,7 @@ static int (*const svm_exit_handlers[])(struct vcpu_svm *svm) = {
 	[SVM_EXIT_VMGEXIT]			= sev_handle_vmgexit,
 };
 
-static void dump_vmcb(struct kvm_vcpu *vcpu)
+void dump_vmcb(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
 	struct vmcb_control_area *control = &svm->vmcb->control;
@@ -3034,6 +3034,71 @@ static void dump_vmcb(struct kvm_vcpu *vcpu)
 	pr_err("%-20s%016llx\n", "avic_physical_id:", control->avic_physical_id);
 	pr_err("%-20s%016llx\n", "vmsa_pa:", control->vmsa_pa);
 	pr_err("VMCB State Save Area:\n");
+
+	if (vcpu->arch.vmsa_encrypted) {
+		struct kvm_sev_info *sev = &to_kvm_svm(vcpu->kvm)->sev_info;
+		struct page *save_page;
+		int ret, error;
+
+		save_page = alloc_page(GFP_KERNEL);
+		if (!save_page)
+			return;
+
+		save = page_address(save_page);
+
+		wbinvd_on_all_cpus();
+
+		printk("*** DEBUG %s:%u:%s - Using SEV_CMD_DBG_DECRYPT to decrypt VMSA\n", __FILE__, __LINE__, __func__);
+		if (sev_snp_guest(vcpu->kvm)) {
+			struct rmpupdate_entry e = {};
+			struct sev_data_snp_dbg *dbg;
+
+			dbg = kzalloc(sizeof(*dbg), GFP_KERNEL);
+			if (!dbg)
+				return;
+
+			e.assigned = true;
+			e.immutable = true;
+
+			if (set_memory_4k((unsigned long)save, 1))
+				pr_err("*** DEBUG: failed to split the region as a 4k\n");
+			else {
+				if (snp_rmpupdate_set(__pa(save), &e))
+					pr_err("*** DEBUG: failed to make firmware page\n");
+			}
+
+			dbg->gctx_paddr = __sme_page_pa(sev->snp_context);;
+			dbg->dst_addr = __psp_pa(save);
+			dbg->src_addr = svm->vmcb->control.vmsa_pa;
+			dbg->len = PAGE_SIZE;
+
+			ret = sev_guest_snp_dbg_decrypt(dbg, &error);
+
+			snp_page_reclaim(__pa(save));
+			kfree(dbg);
+		} else {
+			struct sev_data_dbg *dbg;
+
+			dbg = kzalloc(sizeof(*dbg), GFP_KERNEL);
+			if (!dbg)
+				return;
+
+			dbg->handle = sev->handle;
+			dbg->dst_addr = __psp_pa(save);
+			dbg->src_addr = svm->vmcb->control.vmsa_pa;
+			dbg->len = PAGE_SIZE;
+
+			ret = sev_guest_dbg_decrypt(dbg, &error);
+			kfree(dbg);
+		}
+
+		if (ret)
+			printk("*** DEBUG %s:%u:%s - SEV_CMD_DBG_DECRYPT error, ret=%d, error=%d\n", __FILE__, __LINE__, __func__, ret, error);
+
+	} else {
+		save = get_vmsa(svm);
+	}
+
 	pr_err("%-5s s: %04x a: %04x l: %08x b: %016llx\n",
 	       "es:",
 	       save->es.selector, save->es.attrib,
@@ -3103,6 +3168,47 @@ static void dump_vmcb(struct kvm_vcpu *vcpu)
 	pr_err("%-15s %016llx %-13s %016llx\n",
 	       "excp_from:", save->last_excp_from,
 	       "excp_to:", save->last_excp_to);
+
+	/* dump rax - r15 registers */
+	if (sev_es_guest(vcpu->kvm)) {
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "rax:", save->rax, "rbx:", save->rbx);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "rcx:", save->rcx, "rdx:", save->rdx);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "rsi:", save->rsi, "rdi:", save->rdi);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "rbp:", save->rbp, "rsp:", save->rsp);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "r8:", save->r8, "r9:", save->r9);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "r10:", save->r10, "r11:", save->r11);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "r12:", save->r12, "r13:", save->r13);
+		pr_err("%-15s %016llx %-13s %016llx\n",
+		       "r14:", save->r14, "r15:", save->r15);
+
+		wbinvd_on_all_cpus();
+
+		__free_page(virt_to_page(save));
+	} else {
+		pr_err("%-15s %016llx %-13s %016lx\n",
+		       "rax:", save->rax, "rbx:", vcpu->arch.regs[VCPU_REGS_RBX]);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "rcx:", vcpu->arch.regs[VCPU_REGS_RCX], "rdx:", vcpu->arch.regs[VCPU_REGS_RDX]);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "rsi:", vcpu->arch.regs[VCPU_REGS_RSI], "rdi:", vcpu->arch.regs[VCPU_REGS_RDI]);
+		pr_err("%-15s %016lx %-13s %016llx\n",
+		       "rbp:", vcpu->arch.regs[VCPU_REGS_RBP], "rsp:", save->rsp);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "r8:", vcpu->arch.regs[VCPU_REGS_R8], "r9:", vcpu->arch.regs[VCPU_REGS_R9]);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "r10:", vcpu->arch.regs[VCPU_REGS_R10], "r11:", vcpu->arch.regs[VCPU_REGS_R11]);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "r12:", vcpu->arch.regs[VCPU_REGS_R12], "r13:", vcpu->arch.regs[VCPU_REGS_R13]);
+		pr_err("%-15s %016lx %-13s %016lx\n",
+		       "r14:", vcpu->arch.regs[VCPU_REGS_R14], "r15:", vcpu->arch.regs[VCPU_REGS_R15]);
+	}
 }
 
 static bool svm_is_supported_exit(struct kvm_vcpu *vcpu, u64 exit_code)
