@@ -604,8 +604,8 @@ struct sev_data_snp_launch_start {
 	u64 gctx_paddr;				/* In */
 	u64 policy;				/* In */
 	u64 ma_gctx_paddr;			/* In */
-	u32 ma_en:1;				/* In */
-	u32 imi_en:1;				/* In */
+	u32 ma_en:1,				/* In */
+	    imi_en:1;				/* In */
 	u32 rsvd:30;
 	u8 gosvw[16];				/* In */
 } __packed;
