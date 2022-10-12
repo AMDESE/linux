@@ -149,6 +149,12 @@ struct snp_psc_desc {
 #define GHCB_SEV_ES_PROT_UNSUPPORTED	1
 #define GHCB_SNP_UNSUPPORTED		2
 
+/* Error codes from hypervisor in EXITINFO[31:0] after VMGEXIT */
+#define VMGEXIT_RESULT_OK		0
+#define VMGEXIT_RESULT_EXCEPTION	1
+#define VMGEXIT_RESULT_BAD_INPUT	2
+#define VMGEXIT_RESULT_THROTTLED	3
+
 /* Linux-specific reason codes (used with reason set 1) */
 #define SEV_TERM_SET_LINUX		1
 #define GHCB_TERM_REGISTER		0	/* GHCB GPA registration failure */

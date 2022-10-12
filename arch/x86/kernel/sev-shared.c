@@ -199,7 +199,7 @@ static enum es_result verify_exception_info(struct ghcb *ghcb, struct es_em_ctxt
 	if (!ret)
 		return ES_OK;
 
-	if (ret == 1) {
+	if (ret == VMGEXIT_RESULT_EXCEPTION) {
 		u64 info = ghcb->save.sw_exit_info_2;
 		unsigned long v;
 
@@ -217,6 +217,8 @@ static enum es_result verify_exception_info(struct ghcb *ghcb, struct es_em_ctxt
 
 			return ES_EXCEPTION;
 		}
+	} else if (ret == VMGEXIT_RESULT_THROTTLED) {
+		return ES_RETRY;
 	}
 
 	return ES_VMM_ERROR;

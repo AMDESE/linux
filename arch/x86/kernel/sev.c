@@ -2161,8 +2161,12 @@ int snp_issue_guest_request(u64 exit_code, struct snp_req_data *input, unsigned 
 	}
 
 	ret = sev_es_ghcb_hv_call(ghcb, true, &ctxt, exit_code, input->req_gpa, input->resp_gpa);
-	if (ret)
+	/* ret is an es_result at this point */
+	if (ret) {
+		if (ret == ES_RETRY)
+			ret = -EAGAIN;
 		goto e_put;
+	}
 
 	if (ghcb->save.sw_exit_info_2) {
 		/* Number of expected pages are returned in RBX */
