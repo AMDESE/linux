@@ -625,8 +625,8 @@ static inline void apic_clear_irr(int vec, struct kvm_lapic *apic)
 	if (unlikely(vcpu->arch.apicv_active)) {
 		/* need to update RVI */
 		kvm_lapic_clear_vector(vec, apic->regs + APIC_IRR);
-		kvm_x86_ops->hwapic_irr_update(vcpu,
-				apic_find_highest_irr(apic));
+//SURAVEE		kvm_x86_ops->hwapic_irr_update(vcpu,
+//				apic_find_highest_irr(apic));
 	} else {
 		apic->irr_pending = false;
 		kvm_lapic_clear_vector(vec, apic->regs + APIC_IRR);
@@ -697,10 +697,11 @@ static inline void apic_clear_isr(int vec, struct kvm_lapic *apic)
 	 * on the other hand isr_count and highest_isr_cache are unused
 	 * and must be left alone.
 	 */
-	if (unlikely(vcpu->arch.apicv_active))
-		kvm_x86_ops->hwapic_isr_update(vcpu,
-					       apic_find_highest_isr(apic));
-	else {
+	if (unlikely(vcpu->arch.apicv_active)) {
+//SURAVEE
+//		kvm_x86_ops->hwapic_isr_update(vcpu,
+//					       apic_find_highest_isr(apic));
+	} else {
 		--apic->isr_count;
 		BUG_ON(apic->isr_count < 0);
 		apic->highest_isr_cache = -1;
@@ -2571,8 +2572,9 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 	apic_update_ppr(apic);
 	if (vcpu->arch.apicv_active) {
 		kvm_x86_ops->apicv_post_state_restore(vcpu);
-		kvm_x86_ops->hwapic_irr_update(vcpu, -1);
-		kvm_x86_ops->hwapic_isr_update(vcpu, -1);
+//SURAVEE
+//		kvm_x86_ops->hwapic_irr_update(vcpu, -1);
+//		kvm_x86_ops->hwapic_isr_update(vcpu, -1);
 	}
 
 	vcpu->arch.apic_arb_prio = 0;
@@ -2833,10 +2835,11 @@ int kvm_apic_set_state(struct kvm_vcpu *vcpu, struct kvm_lapic_state *s)
 	apic->highest_isr_cache = -1;
 	if (vcpu->arch.apicv_active) {
 		kvm_x86_ops->apicv_post_state_restore(vcpu);
-		kvm_x86_ops->hwapic_irr_update(vcpu,
-				apic_find_highest_irr(apic));
-		kvm_x86_ops->hwapic_isr_update(vcpu,
-				apic_find_highest_isr(apic));
+//SURAVEE
+//		kvm_x86_ops->hwapic_irr_update(vcpu,
+//				apic_find_highest_irr(apic));
+//		kvm_x86_ops->hwapic_isr_update(vcpu,
+//				apic_find_highest_isr(apic));
 	}
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 	if (ioapic_in_kernel(vcpu->kvm))
