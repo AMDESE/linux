@@ -3313,7 +3313,7 @@ void svm_complete_interrupt_delivery(struct kvm_vcpu *vcpu, int delivery_mode,
 		return;
 	}
 
-//	trace_kvm_apicv_accept_irq(vcpu->vcpu_id, delivery_mode, trig_mode, vector);
+	trace_kvm_apicv_accept_irq(vcpu->vcpu_id, delivery_mode, trig_mode, vector);
 	if (in_guest_mode) {
 		/*
 		 * Signal the doorbell to tell hardware to inject the IRQ.  If
