@@ -38,9 +38,9 @@
  * size of the GATag is defined by hardware (32 bits), but is an opaque value
  * as far as hardware is concerned.
  */
-#define AVIC_VCPU_ID_MASK		AVIC_PHYSICAL_MAX_INDEX_MASK
+#define AVIC_VCPU_ID_MASK		AVIC_PHYSICAL_MAX_INDEX_4K_MASK
 
-#define AVIC_VM_ID_SHIFT		HWEIGHT32(AVIC_PHYSICAL_MAX_INDEX_MASK)
+#define AVIC_VM_ID_SHIFT		HWEIGHT32(AVIC_PHYSICAL_MAX_INDEX_4K_MASK)
 #define AVIC_VM_ID_MASK			(GENMASK(31, AVIC_VM_ID_SHIFT) >> AVIC_VM_ID_SHIFT)
 
 #define AVIC_GATAG_TO_VMID(x)		((x >> AVIC_VM_ID_SHIFT) & AVIC_VM_ID_MASK)
@@ -73,6 +73,9 @@ static u32 next_vm_id = 0;
 static bool next_vm_id_wrapped = 0;
 static DEFINE_SPINLOCK(svm_vm_data_hash_lock);
 bool x2avic_enabled;
+static bool x2avic_4k_vcpu_supported;
+static u64 x2avic_max_physical_id;
+static u64 avic_physical_max_index_mask;
 
 /*
  * This is a wrapper of struct amd_iommu_ir_data.
@@ -87,7 +90,7 @@ static void avic_activate_vmcb(struct vcpu_svm *svm)
 	struct vmcb *vmcb = svm->vmcb;
 
 	vmcb->control.int_ctl &= ~(AVIC_ENABLE_MASK | X2APIC_MODE_MASK);
-	vmcb->control.avic_physical_id &= ~AVIC_PHYSICAL_MAX_INDEX_MASK;
+	vmcb->control.avic_physical_id &= ~avic_physical_max_index_mask;
 
 	vmcb->control.int_ctl |= AVIC_ENABLE_MASK;
 
@@ -100,7 +103,7 @@ static void avic_activate_vmcb(struct vcpu_svm *svm)
 	 */
 	if (x2avic_enabled && apic_x2apic_mode(svm->vcpu.arch.apic)) {
 		vmcb->control.int_ctl |= X2APIC_MODE_MASK;
-		vmcb->control.avic_physical_id |= X2AVIC_MAX_PHYSICAL_ID;
+		vmcb->control.avic_physical_id |= x2avic_max_physical_id;
 		/* Disabling MSR intercept for x2APIC registers */
 		svm_set_x2apic_msr_interception(svm, false);
 	} else {
@@ -122,7 +125,7 @@ static void avic_deactivate_vmcb(struct vcpu_svm *svm)
 	struct vmcb *vmcb = svm->vmcb;
 
 	vmcb->control.int_ctl &= ~(AVIC_ENABLE_MASK | X2APIC_MODE_MASK);
-	vmcb->control.avic_physical_id &= ~AVIC_PHYSICAL_MAX_INDEX_MASK;
+	vmcb->control.avic_physical_id &= ~avic_physical_max_index_mask;
 
 	/* Enabling MSR intercept for x2APIC registers */
 	svm_set_x2apic_msr_interception(svm, true);
@@ -189,13 +192,15 @@ int avic_vm_init(struct kvm *kvm)
 	struct kvm_svm *k2;
 	struct page *p_page;
 	struct page *l_page;
-	u32 vm_id;
+	u32 vm_id, entries;
 
 	if (!enable_apicv)
 		return 0;
 
-	/* Allocating physical APIC ID table (4KB) */
-	p_page = alloc_page(GFP_KERNEL_ACCOUNT);
+	/* Allocating physical APIC ID table */
+	entries = x2avic_max_physical_id + 1;
+	p_page = alloc_pages(GFP_KERNEL_ACCOUNT | __GFP_ZERO,
+			     get_order(sizeof(u64) * entries));
 	if (!p_page)
 		goto free_avic;
 
@@ -262,7 +267,7 @@ static u64 *avic_get_physical_id_entry(struct kvm_vcpu *vcpu,
 	struct kvm_svm *kvm_svm = to_kvm_svm(vcpu->kvm);
 
 	if ((!x2avic_enabled && index > AVIC_MAX_PHYSICAL_ID) ||
-	    (index > X2AVIC_MAX_PHYSICAL_ID))
+	    (index > x2avic_max_physical_id))
 		return NULL;
 
 	avic_physical_id_table = page_address(kvm_svm->avic_physical_id_table_page);
@@ -277,7 +282,7 @@ static int avic_init_backing_page(struct kvm_vcpu *vcpu)
 	struct vcpu_svm *svm = to_svm(vcpu);
 
 	if ((!x2avic_enabled && id > AVIC_MAX_PHYSICAL_ID) ||
-	    (id > X2AVIC_MAX_PHYSICAL_ID))
+	    (id > x2avic_max_physical_id))
 		return -EINVAL;
 
 	if (!svm->vcpu.arch.apic->regs)
@@ -488,7 +493,7 @@ int avic_incomplete_ipi_interception(struct vcpu_svm *svm)
 	u32 icrh = svm->vmcb->control.exit_info_1 >> 32;
 	u32 icrl = svm->vmcb->control.exit_info_1;
 	u32 id = svm->vmcb->control.exit_info_2 >> 32;
-	u32 index = svm->vmcb->control.exit_info_2 & 0x1FF;
+	u32 index = svm->vmcb->control.exit_info_2 & avic_physical_max_index_mask;
 	struct kvm_lapic *apic = svm->vcpu.arch.apic;
 
 	trace_kvm_avic_incomplete_ipi(svm->vcpu.vcpu_id, icrh, icrl, id, index);
@@ -1227,8 +1232,19 @@ bool avic_hardware_setup(struct kvm_x86_ops *x86_ops)
 
 	/* AVIC is a prerequisite for x2AVIC. */
 	x2avic_enabled = boot_cpu_has(X86_FEATURE_X2AVIC);
-	if (x2avic_enabled)
-		pr_info("x2AVIC enabled\n");
+	if (x2avic_enabled) {
+		x2avic_4k_vcpu_supported = !!(cpuid_ecx(0x8000000a) & 0x40);
+		if (x2avic_4k_vcpu_supported) {
+			x2avic_max_physical_id = X2AVIC_MAX_PHYSICAL_ID_4K;
+			avic_physical_max_index_mask = AVIC_PHYSICAL_MAX_INDEX_4K_MASK;
+		} else {
+			x2avic_max_physical_id = X2AVIC_MAX_PHYSICAL_ID;
+			avic_physical_max_index_mask = AVIC_PHYSICAL_MAX_INDEX_MASK;
+		}
+
+		pr_info("x2AVIC enabled%s\n",
+			x2avic_4k_vcpu_supported ? " (w/ 4K-vcpu)" : "");
+	}
 
 	amd_iommu_register_ga_log_notifier(&avic_ga_log_notifier);
 
