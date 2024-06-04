@@ -2540,7 +2540,8 @@ bool kvm_vcpu_block(struct kvm_vcpu *vcpu)
 	preempt_disable();
 	finish_swait(&vcpu->wq, &wait);
 
-	kvm_arch_vcpu_unblocking(vcpu);
+	if (kvm_vcpu_check_block(vcpu) == 0)
+		kvm_arch_vcpu_unblocking(vcpu);
 	preempt_enable();
 
 	return waited;
