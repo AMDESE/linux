@@ -4198,12 +4198,18 @@ static bool try_async_pf(struct kvm_vcpu *vcpu, bool prefault, gfn_t gfn,
 	struct kvm_memory_slot *slot;
 	bool async;
 
-	/*
-	 * Don't expose private memslots to L2.
-	 */
-	if (is_guest_mode(vcpu) && !kvm_is_visible_gfn(vcpu->kvm, gfn)) {
-		*pfn = KVM_PFN_NOSLOT;
-		return false;
+	if (!kvm_is_visible_gfn(vcpu->kvm, gfn)) {
+		/* Don't expose private memslots to L2. */
+		if (is_guest_mode(vcpu)) {
+			*pfn = KVM_PFN_NOSLOT;
+			return false;
+		}
+
+		slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
+		if (slot &&
+		    slot->id == APIC_ACCESS_PAGE_PRIVATE_MEMSLOT &&
+		    !kvm_apicv_activated(vcpu->kvm))
+			return true;
 	}
 
 	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
@@ -4314,8 +4320,22 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gpa_t gpa, u32 error_code,
 	mmu_seq = vcpu->kvm->mmu_notifier_seq;
 	smp_rmb();
 
-	if (try_async_pf(vcpu, prefault, gfn, gpa, &pfn, write, &map_writable))
+	if (try_async_pf(vcpu, prefault, gfn, gpa, &pfn, write, &map_writable)) {
+		/*
+		 * If the APIC access page exists but is disabled, go directly
+		 * to emulation without caching the MMIO access or creating a
+		 * MMIO SPTE.  That way the cache doesn't need to be purged
+		 * when the AVIC is re-enabled.
+		 */
+		struct kvm_memory_slot *slot;
+
+		slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
+		if (slot &&
+		    slot->id == APIC_ACCESS_PAGE_PRIVATE_MEMSLOT &&
+		    !kvm_apicv_activated(vcpu->kvm))
+			return RET_PF_EMULATE;
 		return RET_PF_RETRY;
+	}
 
 	if (handle_abnormal_pfn(vcpu, 0, gfn, pfn, ACC_ALL, &r))
 		return r;
