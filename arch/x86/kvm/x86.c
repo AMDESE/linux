@@ -128,6 +128,8 @@ static u64 __read_mostly cr4_reserved_bits = CR4_RESERVED_BITS;
 #define KVM_X2APIC_API_VALID_FLAGS (KVM_X2APIC_API_USE_32BIT_IDS | \
                                     KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK)
 
+#define KVM_EXIT_COCO_VALID_MASK BIT_ULL(KVM_EXIT_COCO_REQ_CERTS)
+
 static void update_cr8_intercept(struct kvm_vcpu *vcpu);
 static void process_nmi(struct kvm_vcpu *vcpu);
 static void __kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags);
@@ -4782,6 +4784,9 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_READONLY_MEM:
 		r = kvm ? kvm_arch_has_readonly_mem(kvm) : 1;
 		break;
+	case KVM_CAP_EXIT_COCO:
+		r = KVM_EXIT_COCO_VALID_MASK;
+		break;
 	default:
 		break;
 	}
@@ -6743,6 +6748,14 @@ split_irqchip_unlock:
 		mutex_unlock(&kvm->lock);
 		break;
 	}
+	case KVM_CAP_EXIT_COCO:
+		if (cap->args[0] & ~KVM_EXIT_COCO_VALID_MASK) {
+			r = -EINVAL;
+			break;
+		}
+		kvm->arch.coco_exit_enabled = cap->args[0];
+		r = 0;
+		break;
 	default:
 		r = -EINVAL;
 		break;

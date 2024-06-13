@@ -7173,6 +7173,107 @@ Please note that the kernel is allowed to use the kvm_run structure as the
 primary storage for certain register types. Therefore, the kernel may use the
 values in kvm_run even if the corresponding bit in kvm_dirty_regs is not set.
 
+::
+
+		/* KVM_EXIT_COCO */
+		struct kvm_exit_coco {
+		#define KVM_EXIT_COCO_REQ_CERTS			0
+		#define KVM_EXIT_COCO_MAX			1
+			__u8 nr;
+			__u8 pad0[7];
+			__u32 ret;
+			__u32 pad1;
+			union {
+				struct {
+					__u64 gfn;
+					__u32 npages;
+				} req_certs;
+			};
+		};
+
+KVM_EXIT_COCO events are intended to handle cases where a confidential
+VM requires some action on the part of userspace, or cases where userspace
+needs to be informed of some activity relating to a confidential VM.
+
+A `kvm_exit_coco` structure is defined to encapsulate the data to be sent to
+or returned by userspace. The `nr` field defines the specific type of event
+that needs to be serviced, and that type is used as a discriminator to
+determine which union type should be used for input/output. If the exit is
+successfully processed by userspace, `ret` should be set to 0 to indicate
+success. A non-zero `ret` value will be treated as an error unless there is
+specific handling associated with a particular error code in the per-union
+type documentation.
+
+The parameters for each of these event/union types are documented below:
+
+  - ``KVM_EXIT_COCO_REQ_CERTS``
+
+    This event provides a way to request certificate data from userspace and
+    have it written into guest memory. This is intended primarily to handle
+    attestation requests made by SEV-SNP guests (using the Extended Guest
+    Requests GHCB command as defined by the GHCB 2.0 specification for SEV-SNP
+    guests), where additional certificate data corresponding to the
+    endorsement key used by firmware to sign an attestation report can be
+    optionally provided by userspace to pass along to the guest together with
+    the firmware-provided attestation report.
+
+    In the case of ``KVM_EXIT_COCO_REQ_CERTS`` events, the `req_certs` union
+    type is used. KVM will supply in `gfn` the non-private guest page that
+    userspace should use to write the contents of certificate data. In the
+    case of SEV-SNP, the format of this certificate data is defined in the
+    GHCB 2.0 specification (see section "SNP Extended Guest Request"). KVM
+    will also supply in `npages` the number of contiguous pages available
+    for writing the certificate data into.
+
+      - If the supplied number of pages is sufficient, userspace must write
+        the certificate table blob (in the format defined by the GHCB spec)
+        into the address corresponding to `gfn` and set `ret` to 0 to indicate
+        success. If no certificate data is available, then userspace can
+        either write an empty certificate table into the address corresponding
+        to `gfn`, or it can disable ``KVM_EXIT_COCO_REQ_CERTS`` (via
+        ``KVM_CAP_EXIT_COCO``), in which case KVM will handle returning an
+        empty certificate table to the guest.
+
+      - If the number of pages supplied is not sufficient, userspace must set
+        the required number of pages in `npages` and then set `ret` to
+        ``ENOSPC``.
+
+      - If the certificate cannot be immediately provided, userspace should set
+	`ret` to ``EAGAIN``, which will inform the guest to retry the request
+	later. One scenario where this would be useful is if the certificate
+	is in the process of being updated and cannot be fetched until the
+	update completes (see the NOTE below regarding how file-locking can
+	be used to orchestrate such updates between management/guests).
+
+      - If some other error occurred, userspace must set `ret` to ``EIO``.
+
+    NOTE: In the case of SEV-SNP, the endorsement key used by firmware may
+    change as a result of management activities like updating SEV-SNP firmware
+    or loading new endorsement keys, so some care should be taken to keep the
+    returned certificate data in sync with the actual endorsement key in use by
+    firmware at the time the attestation request is sent to SNP firmware. The
+    recommended scheme to do this is to use file locking (e.g. via fcntl()'s
+    F_OFD_SETLK) in the following manner:
+
+      - The VMM should obtain a shared/read or exclusive/write lock on the path
+	the certificate blob file resides at before reading it and returning it
+	to KVM, and continue to hold the lock until the attestation request is
+        actually sent to firmware. To facilitate this, the VMM can set the
+        ``immediate_exit`` flag of kvm_run just after supplying the certificate
+        data, and just before and resuming the vCPU. This will ensure the vCPU
+        will exit again to userspace with ``-EINTR`` after it finishes fetching
+        the attestation request from firmware, at which point the VMM can
+        safely drop the file lock.
+
+      - Tools/libraries that perform updates to SNP firmware TCB values or
+        endorsement keys (e.g. via /dev/sev interfaces such as ``SNP_COMMIT``,
+        ``SNP_SET_CONFIG``, or ``SNP_VLEK_LOAD``, see
+        Documentation/virt/coco/sev-guest.rst for more details) in such a way
+        that the certificate blob needs to be updated, should similarly take an
+        exclusive lock on the certificate blob for the duration of any updates
+        to endorsement keys or the certificate blob contents to ensure that
+        VMMs using the above scheme will not return certificate blob data that
+        is out of sync with the endorsement key used by firmware.
 
 .. _cap_enable:
 
@@ -9016,6 +9117,24 @@ Note, KVM_X86_SW_PROTECTED_VM is currently only for development and testing.
 Do not use KVM_X86_SW_PROTECTED_VM for "real" VMs, and especially not in
 production.  The behavior and effective ABI for software-protected VMs is
 unstable.
+
+8.42 KVM_CAP_EXIT_COCO
+----------------------
+
+:Capability: KVM_CAP_EXIT_COCO
+:Architectures: x86
+:Type: vm
+
+This capability, if enabled, will cause KVM to exit to userspace with
+KVM_EXIT_COCO exit reason to process certain events related to confidential
+guests.
+
+Calling KVM_CHECK_EXTENSION for this capability will return a bitmask of
+KVM_EXIT_COCO event types that can be configured to exit to userspace.
+
+The argument to KVM_ENABLE_CAP is also a bitmask, and must be a subset
+of the result of KVM_CHECK_EXTENSION.  KVM will forward to userspace
+the event types whose corresponding bit is in the argument.
 
 9. Known KVM API problems
 =========================
