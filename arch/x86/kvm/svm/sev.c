@@ -2189,6 +2189,9 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pf
 	int npages = (1 << order);
 	gfn_t gfn;
 
+	pr_debug("%s: GFN start 0x%llx PFN start 0x%llx order %d\n",
+		 __func__, gfn_start, pfn, order);
+
 	if (WARN_ON_ONCE(sev_populate_args->type != KVM_SEV_SNP_PAGE_TYPE_ZERO && !src))
 		return -EINVAL;
 
@@ -4745,6 +4748,33 @@ out_no_trace:
 	kvm_release_page_unused(page);
 }
 
+static bool is_pfn_range_private(kvm_pfn_t start, kvm_pfn_t end)
+{
+	kvm_pfn_t pfn = start;
+
+	while (pfn < end) {
+		int ret, rmp_level;
+		bool assigned;
+
+		ret = snp_lookup_rmpentry(pfn, &assigned, &rmp_level);
+		if (ret) {
+			pr_warn_ratelimited("SEV: Failed to retrieve RMP entry: PFN 0x%llx GFN start 0x%llx GFN end 0x%llx RMP level %d error %d\n",
+					    pfn, start, end, rmp_level, ret);
+			return false;
+		}
+
+		if (!assigned) {
+			pr_debug("%s: overlap detected, PFN 0x%llx start 0x%llx end 0x%llx RMP level %d\n",
+				 __func__, pfn, start, end, rmp_level);
+			return false;
+		}
+
+		pfn++;
+	}
+
+	return true;
+}
+
 static bool is_pfn_range_shared(kvm_pfn_t start, kvm_pfn_t end)
 {
 	kvm_pfn_t pfn = start;
@@ -4800,6 +4830,7 @@ int sev_gmem_prepare(struct kvm *kvm, kvm_pfn_t pfn, gfn_t gfn, int max_order)
 {
 	struct kvm_sev_info *sev = to_kvm_sev_info(kvm);
 	kvm_pfn_t pfn_aligned;
+	struct folio *folio;
 	gfn_t gfn_aligned;
 	int level, rc;
 	bool assigned;
@@ -4830,6 +4861,16 @@ int sev_gmem_prepare(struct kvm *kvm, kvm_pfn_t pfn, gfn_t gfn, int max_order)
 		gfn_aligned = gfn;
 	}
 
+	folio = page_folio(pfn_to_page(pfn_aligned));
+	if (!folio_test_uptodate(folio)) {
+		unsigned long nr_pages = level == PG_LEVEL_4K ? 1 : 512;
+		int i;
+
+		pr_debug("%s: folio not up-to-date, clearing folio pages.\n", __func__);
+		for (i = 0; i < nr_pages; i++)
+			clear_highpage(pfn_to_page(pfn_aligned + i));
+	}
+
 	rc = rmp_make_private(pfn_aligned, gfn_to_gpa(gfn_aligned), level, sev->asid, false);
 	if (rc) {
 		pr_err_ratelimited("SEV: Failed to update RMP entry: GFN %llx PFN %llx level %d error %d\n",
@@ -4839,6 +4880,15 @@ int sev_gmem_prepare(struct kvm *kvm, kvm_pfn_t pfn, gfn_t gfn, int max_order)
 
 	pr_debug("%s: updated: gfn %llx pfn %llx pfn_aligned %llx max_order %d level %d\n",
 		 __func__, gfn, pfn, pfn_aligned, max_order, level);
+
+	if (pfn == pfn_aligned && folio_order(folio) == max_order) {
+		folio_mark_uptodate(folio);
+		pr_debug("%s: setting folio up-to-date (full update)\n", __func__);
+	} else if (is_pfn_range_private(pfn_aligned,
+					pfn_aligned + (1 << folio_order(folio)))) {
+		folio_mark_uptodate(folio);
+		pr_debug("%s: setting folio up-to-date (follow-up update)\n", __func__);
+	}
 
 	return 0;
 }
