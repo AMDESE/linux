@@ -1132,7 +1132,9 @@ static void init_vmcb(struct vcpu_svm *svm)
 		clr_intercept(svm, INTERCEPT_PAUSE);
 	}
 
-	if (kvm_vcpu_apicv_active(&svm->vcpu))
+//HERE
+//	if (kvm_vcpu_apicv_active(&svm->vcpu))
+	if (enable_apicv)
 		avic_init_vmcb(svm);
 
 	/*
