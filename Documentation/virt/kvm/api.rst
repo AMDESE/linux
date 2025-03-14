@@ -6416,6 +6416,23 @@ guest_memfd has the GUEST_MEMFD_FLAG_SUPPORT_SHARED set, then the fault will
 always be consumed from guest_memfd, regardless of whether it is a shared or a
 private fault.
 
+<<<<<<< HEAD
+=======
+For these memslots, userspace_addr is checked to be the mmap()-ed view of the
+same range specified using gmem.pgoff.  Other accesses by KVM, e.g., instruction
+emulation, go via slot->userspace_addr.  The slot->userspace_addr field can be
+set to 0 to skip this check, which indicates that KVM would not access memory
+belonging to the slot via its userspace_addr.
+
+The use of GUEST_MEMFD_FLAG_SUPPORT_SHARED will not be allowed for CoCo VMs.
+This is validated when the guest_memfd instance is bound to the VM.
+
+If the capability KVM_CAP_GMEM_CONVERSIONS is supported, then the 'flags' field
+supports GUEST_MEMFD_FLAG_INIT_PRIVATE.  Setting GUEST_MEMFD_FLAG_INIT_PRIVATE
+will initialize the memory for the guest_memfd as guest-only and not faultable
+by the host.
+
+>>>>>>> 7359fd04a59c (KVM: guest_memfd: Introduce and use shareability to guard faulting)
 See KVM_SET_USER_MEMORY_REGION2 for additional details.
 
 4.143 KVM_PRE_FAULT_MEMORY
