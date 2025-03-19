@@ -129,35 +129,6 @@ static int send_sfs_update_package(struct psp_sfs_device *sfs_dev, char *payload
 	return ret;
 }
 
-static int send_sfs_pass_thru_command(struct psp_sfs_device *sfs_dev, char *payload_name)
-{
-	char payload_path[PAYLOAD_NAME_SIZE];
-	const struct firmware *firmware;
-	int sub_cmd_id, ret;
-
-	sprintf(payload_path, "amd/%s", payload_name);
-
-	if ((ret = firmware_request_nowarn(&firmware, payload_path, sfs_dev->dev)) < 0) {
-		pr_info("firmware request fail %d\n", ret);
-		return -ENOENT;
-	}
-
-	sfs_dev->result = &sfs_dev->command_hdr->ext_req.header.status;
-	sfs_dev->payload = &sfs_dev->command_hdr->ext_req.buf;
-
-	/*
-	 * Copy firmware data to a kernel allocated contiguous
-	 * memory region.
-	 */
-	memcpy(sfs_dev->command_hdr, firmware->data, firmware->size);
-	sub_cmd_id = sfs_dev->command_hdr->ext_req.header.sub_cmd_id;
-
-	ret = send_sfs_cmd(sfs_dev, sub_cmd_id);
-
-	release_firmware(firmware);
-	return ret;
-}
-
 void sfs_dev_destroy(struct psp_device *psp)
 {
 	struct psp_sfs_device *sfs_dev = psp->sfs_data;
@@ -236,29 +207,6 @@ static long sfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 		if (copy_to_user(argp + PAYLOAD_NAME_SIZE + sizeof(u32), sfs_dev->payload, sizeof(u32)))
 			ret = -EFAULT;
-		break;
-	case SFSIOCPASSTHRU:
-		pr_info("in SFSIOCPASSTHRU\n");
-
-		if (copy_from_user(payload_name, argp, PAYLOAD_NAME_SIZE)) {
-			ret = -EFAULT;
-			goto unlock;
-		}
-
-		ret = send_sfs_pass_thru_command(sfs_dev, payload_name);
-		if (ret && ret != -EIO)
-			goto unlock;
-
-		/*
-		 * return SFS status and extended status back to userspace
-		 * if PSP status indicated command error.
-		 */
-		if (copy_to_user(argp + PAYLOAD_NAME_SIZE, sfs_dev->result, sizeof(u32))) {
-			ret = -EFAULT;
-		}
-		if (copy_to_user(argp + PAYLOAD_NAME_SIZE + sizeof(u32), sfs_dev->payload, sizeof(u32))) {
-			ret = -EFAULT;
-		}
 		break;
 	default:
 		ret = -EINVAL;

@@ -83,12 +83,4 @@ struct sfs_user_update_package {
  */
 #define SFSIOCUPDATEPKG	_IOWR(SFS_IOC_TYPE, 0x2, struct sfs_user_update_package)
 
-/**
- * SFSIOCPASSTHRU -  pass-through SFS command.
- *                   Pass-through the TEE extended command header and
- *                   SFS update package to the PSP from the payload specified in
- *                   /lib/firmware/amd.
- */
-#define SFSIOCPASSTHRU	_IOWR(SFS_IOC_TYPE, 0x3, struct sfs_user_update_package)
-
 #endif /* __PSP_SFS_USER_H__ */
