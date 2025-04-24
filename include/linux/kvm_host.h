@@ -738,6 +738,9 @@ static inline u64 kvm_gmem_get_supported_flags(struct kvm *kvm)
 	if (!kvm || kvm_arch_supports_gmem_init_shared(kvm))
 		flags |= GUEST_MEMFD_FLAG_INIT_SHARED;
 
+	if (IS_ENABLED(CONFIG_KVM_GMEM_HUGETLB))
+		flags |= GUEST_MEMFD_FLAG_HUGETLB;
+
 	return flags;
 }
 #endif
