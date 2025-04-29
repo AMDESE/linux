@@ -176,6 +176,7 @@ int truncate_inode_folio(struct address_space *mapping, struct folio *folio)
 	filemap_remove_folio(folio);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(truncate_inode_folio);
 
 static int try_folio_split_or_unmap(struct folio *folio, struct page *split_at,
 				    unsigned long min_order)
