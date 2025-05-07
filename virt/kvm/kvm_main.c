@@ -4930,6 +4930,8 @@ static int kvm_vm_ioctl_check_extension_generic(struct kvm *kvm, long arg)
 		return 1;
 	case KVM_CAP_GUEST_MEMFD_FLAGS:
 		return kvm_gmem_get_supported_flags(kvm);
+	case KVM_CAP_GUEST_MEMFD_CONVERSION:
+		return !kvm || (kvm_gmem_get_supported_flags(kvm) & GUEST_MEMFD_FLAG_MMAP);
 #endif
 	default:
 		break;

@@ -13951,13 +13951,12 @@ bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 
 #ifdef CONFIG_KVM_GUEST_MEMFD
 /*
- * KVM doesn't yet support initializing guest_memfd memory as shared for VMs
- * with private memory (the private vs. shared tracking needs to be moved into
- * guest_memfd).
+ * With per-page shareability tracking in guest_memfd, INIT_SHARED is
+ * supported for all VMs that support guest_memfd.
  */
 bool kvm_arch_supports_gmem_init_shared(struct kvm *kvm)
 {
-	return !kvm_arch_has_private_mem(kvm);
+	return true;
 }
 
 #ifdef CONFIG_HAVE_KVM_ARCH_GMEM_PREPARE
