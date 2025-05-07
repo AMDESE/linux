@@ -841,6 +841,29 @@ static int kvm_gmem_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
+bool kvm_gmem_is_private(struct kvm_memory_slot *slot, gfn_t gfn)
+{
+	struct inode *inode;
+	struct file *file;
+	pgoff_t index;
+	bool ret;
+
+	file = kvm_gmem_get_file(slot);
+	if (!file)
+		return false;
+
+	index = kvm_gmem_get_index(slot, gfn);
+	inode = file_inode(file);
+
+	filemap_invalidate_lock_shared(inode->i_mapping);
+	ret = kvm_gmem_shareability_get(inode, index) == SHAREABILITY_GUEST;
+	filemap_invalidate_unlock_shared(inode->i_mapping);
+
+	fput(file);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_gmem_is_private);
+
 static long kvm_gmem_ioctl(struct file *file, unsigned int ioctl,
 			   unsigned long arg)
 {

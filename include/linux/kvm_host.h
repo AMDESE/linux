@@ -2534,6 +2534,15 @@ static inline bool kvm_gmem_memslot_supports_shared(const struct kvm_memory_slot
 	return slot->flags & KVM_MEMSLOT_SUPPORTS_GMEM_SHARED;
 }
 
+#ifdef CONFIG_KVM_GMEM_SHARED_MEM
+bool kvm_gmem_is_private(struct kvm_memory_slot *slot, gfn_t gfn);
+#else
+static inline bool kvm_gmem_is_private(struct kvm_memory_slot *slot, gfn_t gfn)
+{
+	return false;
+}
+#endif /* CONFIG_KVM_GMEM_SHARED_MEM */
+
 #ifdef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
 static inline unsigned long kvm_get_memory_attributes(struct kvm *kvm, gfn_t gfn)
 {
@@ -2562,14 +2571,8 @@ static inline bool kvm_mem_is_private(struct kvm *kvm, gfn_t gfn)
 		return false;
 
 	slot = gfn_to_memslot(kvm, gfn);
-	if (kvm_slot_has_gmem(slot) && kvm_gmem_memslot_supports_shared(slot)) {
-		/*
-		 * Without in-place conversion support, if a guest_memfd memslot
-		 * supports shared memory, then all the slot's memory is
-		 * considered not private, i.e., implicitly shared.
-		 */
-		return false;
-	}
+	if (kvm_slot_has_gmem(slot) && kvm_gmem_memslot_supports_shared(slot))
+		return kvm_gmem_is_private(slot, gfn);
 
 	return kvm_get_memory_attributes(kvm, gfn) & KVM_MEMORY_ATTRIBUTE_PRIVATE;
 }
