@@ -1189,7 +1189,7 @@ int kvm_gmem_create(struct kvm *kvm, struct kvm_create_guest_memfd *args)
 	u64 flags = args->flags;
 	u64 valid_flags = 0;
 
-	if (kvm_arch_supports_gmem_shared_mem(kvm))
+	if (IS_ENABLED(CONFIG_KVM_GMEM_SHARED_MEM))
 		valid_flags |= GUEST_MEMFD_FLAG_SUPPORT_SHARED;
 
 	if (flags & GUEST_MEMFD_FLAG_SUPPORT_SHARED)
@@ -1231,6 +1231,10 @@ int kvm_gmem_bind(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	if (offset < 0 || !PAGE_ALIGNED(offset) ||
 	    offset + size > i_size_read(inode))
+		goto err;
+
+	/* This should have been checked during guest_memfd creation time. */
+	if (kvm_gmem_supports_shared(inode) && WARN_ON_ONCE(!IS_ENABLED(CONFIG_KVM_GMEM_SHARED_MEM)))
 		goto err;
 
 	filemap_invalidate_lock(inode->i_mapping);
