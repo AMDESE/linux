@@ -379,7 +379,8 @@ static void test_guest_memfd_flags(struct kvm_vm *vm, uint64_t valid_flags)
 	for (flag = BIT(0); flag; flag <<= 1) {
 		test_vm_with_gmem_flag(vm, flag, flag & valid_flags);
 
-		if (flag == GUEST_MEMFD_FLAG_MMAP) {
+		if (flag == GUEST_MEMFD_FLAG_MMAP &&
+		    kvm_has_cap(KVM_CAP_GUEST_MEMFD_CONVERSION)) {
 			test_vm_with_gmem_flag(
 				vm, flag | GUEST_MEMFD_FLAG_INIT_SHARED, true);
 		}
