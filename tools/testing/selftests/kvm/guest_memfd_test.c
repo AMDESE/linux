@@ -352,23 +352,36 @@ static void test_create_guest_memfd_multiple(struct kvm_vm *vm)
 	close(fd1);
 }
 
-static void test_guest_memfd_flags(struct kvm_vm *vm)
+static void test_vm_with_gmem_flag(struct kvm_vm *vm, uint64_t flag,
+				   bool expect_valid)
 {
-	uint64_t valid_flags = vm_check_cap(vm, KVM_CAP_GUEST_MEMFD_FLAGS);
-	uint64_t flag;
+	size_t page_size = getpagesize();
 	int fd;
 
+	fd = __vm_create_guest_memfd(vm, page_size, flag);
+
+	if (expect_valid) {
+		TEST_ASSERT(fd >= 0,
+			    "guest_memfd() with flag '0x%lx' should succeed",
+			    flag);
+		close(fd);
+	} else {
+		TEST_ASSERT(fd < 0 && errno == EINVAL,
+			    "guest_memfd() with flag '0x%lx' should fail with EINVAL",
+			    flag);
+	}
+}
+
+static void test_guest_memfd_flags(struct kvm_vm *vm, uint64_t valid_flags)
+{
+	uint64_t flag;
+
 	for (flag = BIT(0); flag; flag <<= 1) {
-		fd = __vm_create_guest_memfd(vm, page_size, flag);
-		if (flag & valid_flags) {
-			TEST_ASSERT(fd >= 0,
-				    "guest_memfd() with flag '0x%lx' should succeed",
-				    flag);
-			close(fd);
-		} else {
-			TEST_ASSERT(fd < 0 && errno == EINVAL,
-				    "guest_memfd() with flag '0x%lx' should fail with EINVAL",
-				    flag);
+		test_vm_with_gmem_flag(vm, flag, flag & valid_flags);
+
+		if (flag == GUEST_MEMFD_FLAG_MMAP) {
+			test_vm_with_gmem_flag(
+				vm, flag | GUEST_MEMFD_FLAG_INIT_SHARED, true);
 		}
 	}
 }
@@ -413,11 +426,10 @@ static void test_guest_memfd(unsigned long vm_type)
 	struct kvm_vm *vm = vm_create_barebones_type(vm_type);
 	uint64_t flags;
 
-	test_guest_memfd_flags(vm);
+	flags = vm_check_cap(vm, KVM_CAP_GUEST_MEMFD_FLAGS);
+	test_guest_memfd_flags(vm, flags);
 
 	__test_guest_memfd(vm, 0);
-
-	flags = vm_check_cap(vm, KVM_CAP_GUEST_MEMFD_FLAGS);
 	if (flags & GUEST_MEMFD_FLAG_MMAP)
 		__test_guest_memfd(vm, GUEST_MEMFD_FLAG_MMAP);
 
