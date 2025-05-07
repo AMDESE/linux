@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 
 #include "kvm_util.h"
 #include "test_util.h"
@@ -232,6 +233,41 @@ static void test_mmap_not_supported(int fd, size_t total_size)
 	TEST_ASSERT_EQ(mem, MAP_FAILED);
 }
 
+static void assert_not_faultable(char *address)
+{
+	pid_t child_pid;
+
+	child_pid = fork();
+	TEST_ASSERT(child_pid != -1, "fork failed");
+
+	if (child_pid == 0) {
+		*address = 'A';
+		TEST_FAIL("Child should have exited with a signal");
+	} else {
+		int status;
+
+		waitpid(child_pid, &status, 0);
+
+		TEST_ASSERT(WIFSIGNALED(status),
+			    "Child should have exited with a signal");
+		TEST_ASSERT_EQ(WTERMSIG(status), SIGBUS);
+	}
+}
+
+static void test_faulting_sigbus(int fd, size_t total_size)
+{
+	char *mem;
+	int ret;
+
+	mem = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	TEST_ASSERT(mem != MAP_FAILED, "mmaping() guest memory should pass.");
+
+	assert_not_faultable(mem);
+
+	ret = munmap(mem, total_size);
+	TEST_ASSERT(!ret, "munmap should succeed");
+}
+
 static void test_file_size(int fd, size_t total_size)
 {
 	struct stat sb;
@@ -420,6 +456,9 @@ static void __test_guest_memfd(struct kvm_vm *vm, uint64_t flags)
 	gmem_test(file_size, vm, flags);
 	gmem_test(fallocate, vm, flags);
 	gmem_test(invalid_punch_hole, vm, flags);
+
+	if (kvm_has_cap(KVM_CAP_GUEST_MEMFD_CONVERSION))
+		gmem_test(faulting_sigbus, vm, GUEST_MEMFD_FLAG_MMAP);
 }
 
 static void test_guest_memfd(unsigned long vm_type)
