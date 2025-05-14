@@ -104,8 +104,6 @@ enum tva_type {
 #define thp_vma_allowable_order(vma, vm_flags, type, order) \
 	(!!thp_vma_allowable_orders(vma, vm_flags, type, BIT(order)))
 
-#define split_folio(f) split_folio_to_list(f, NULL)
-
 #ifdef CONFIG_PGTABLE_HAS_HUGE_LEAVES
 #define HPAGE_PMD_SHIFT PMD_SHIFT
 #define HPAGE_PUD_SHIFT PUD_SHIFT
@@ -721,6 +719,11 @@ static inline struct folio *get_persistent_huge_zero_folio(void)
 	return NULL;
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+
+static inline int split_folio(struct folio *folio)
+{
+	return split_folio_to_list(folio, NULL);
+}
 
 static inline int split_folio_to_list_to_order(struct folio *folio,
 		struct list_head *list, int new_order)
