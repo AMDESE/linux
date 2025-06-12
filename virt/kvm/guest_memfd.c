@@ -1429,12 +1429,16 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 			(npages - i) < (1 << max_order));
 
 		ret = -EINVAL;
-		while (!kvm_range_has_memory_attributes(kvm, gfn, gfn + (1 << max_order),
-							KVM_MEMORY_ATTRIBUTE_PRIVATE,
-							KVM_MEMORY_ATTRIBUTE_PRIVATE)) {
-			if (!max_order)
-				goto put_folio_and_exit;
-			max_order--;
+		if (!kvm_gmem_memslot_supports_shared(slot)) {
+			while (!kvm_range_has_memory_attributes(kvm, gfn, gfn + (1 << max_order),
+								KVM_MEMORY_ATTRIBUTE_PRIVATE,
+								KVM_MEMORY_ATTRIBUTE_PRIVATE)) {
+				if (!max_order)
+					goto put_folio_and_exit;
+				max_order--;
+			}
+		} else {
+			max_order = 0;
 		}
 
 		p = src ? src + i * PAGE_SIZE : NULL;
