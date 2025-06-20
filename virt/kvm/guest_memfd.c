@@ -46,7 +46,6 @@ static inline struct kvm_gmem_inode_info *KVM_GMEM_I(struct inode *inode)
 static struct mempolicy *kvm_gmem_get_pgoff_policy(struct kvm_gmem_inode_info *info,
 						   pgoff_t index);
 
-static struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index);
 static void kvm_gmem_invalidate_begin(struct kvm_gmem *gmem, pgoff_t start,
 				      pgoff_t end);
 static void kvm_gmem_invalidate_end(struct kvm_gmem *gmem, pgoff_t start,
@@ -1030,7 +1029,7 @@ static int kvm_gmem_filemap_add_folio(struct address_space *mapping,
  * Ignore accessed, referenced, and dirty flags.  The memory is
  * unevictable and there is no storage to write back to.
  */
-static struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index)
+struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index)
 {
 	struct mempolicy *policy;
 	size_t allocated_size;
@@ -1145,6 +1144,7 @@ err:
 	filemap_remove_folio(folio);
 	return ERR_PTR(ret);
 }
+EXPORT_SYMBOL_GPL(kvm_gmem_get_folio);
 
 static void kvm_gmem_invalidate_begin_and_zap(struct kvm_gmem *gmem,
 					      pgoff_t start, pgoff_t end)

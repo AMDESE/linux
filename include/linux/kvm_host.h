@@ -2623,4 +2623,6 @@ static inline void kvm_disable_virtualization(void) { }
  */
 void kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *data);
 
+struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index);
+
 #endif
