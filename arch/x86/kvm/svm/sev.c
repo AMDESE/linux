@@ -3045,7 +3045,8 @@ out:
 
 		if (sev_snp_supported) {
 			nr_ciphertext_hiding_asids = init_args.max_snp_asid;
-			snp_supported_policy_bits = KVM_SNP_POLICY_MASK_VALID;
+			snp_supported_policy_bits = sev_get_snp_policy_bits();
+			snp_supported_policy_bits &= KVM_SNP_POLICY_MASK_VALID;
 		}
 
 		/*
