@@ -81,6 +81,8 @@ module_param_named(ciphertext_hiding_asids, nr_ciphertext_hiding_asids, uint, 04
 					 SNP_POLICY_MASK_DEBUG		| \
 					 SNP_POLICY_MASK_SINGLE_SOCKET)
 
+static u64 snp_supported_policy_bits;
+
 #define INITIAL_VMSA_GPA 0xFFFFFFFFF000
 
 static u8 sev_enc_bit;
@@ -2088,6 +2090,10 @@ int sev_dev_get_attr(u32 group, u64 attr, u64 *val)
 		*val = sev_supported_vmsa_features;
 		return 0;
 
+	case KVM_X86_SNP_POLICY_BITS:
+		*val = snp_supported_policy_bits;
+		return 0;
+
 	default:
 		return -ENXIO;
 	}
@@ -2152,7 +2158,7 @@ static int snp_launch_start(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	if (params.flags)
 		return -EINVAL;
 
-	if (params.policy & ~SNP_POLICY_MASK_VALID)
+	if (params.policy & ~snp_supported_policy_bits)
 		return -EINVAL;
 
 	/* Check for policy bits that must be set */
@@ -3045,8 +3051,10 @@ out:
 		else if (sev_snp_supported)
 			sev_snp_supported = is_sev_snp_initialized();
 
-		if (sev_snp_supported)
+		if (sev_snp_supported) {
 			nr_ciphertext_hiding_asids = init_args.max_snp_asid;
+			snp_supported_policy_bits = SNP_POLICY_MASK_VALID;
+		}
 
 		/*
 		 * If ciphertext hiding is enabled, the joint SEV-ES/SEV-SNP
