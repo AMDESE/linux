@@ -630,6 +630,14 @@ void hugetlb_vmemmap_optimize_folio(const struct hstate *h, struct folio *folio)
 	free_vmemmap_page_list(&vmemmap_pages);
 }
 
+void hugetlb_vmemmap_optimize_folio_nosync(const struct hstate *h, struct folio *folio)
+{
+	LIST_HEAD(vmemmap_pages);
+
+	__hugetlb_vmemmap_optimize_folio(h, folio, &vmemmap_pages, 0);
+	free_vmemmap_page_list(&vmemmap_pages);
+}
+
 static int hugetlb_vmemmap_split_folio(const struct hstate *h, struct folio *folio)
 {
 	unsigned long vmemmap_start = (unsigned long)&folio->page, vmemmap_end;

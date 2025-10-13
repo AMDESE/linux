@@ -25,6 +25,7 @@ long hugetlb_vmemmap_restore_folios(const struct hstate *h,
 					struct list_head *folio_list,
 					struct list_head *non_hvo_folios);
 void hugetlb_vmemmap_optimize_folio(const struct hstate *h, struct folio *folio);
+void hugetlb_vmemmap_optimize_folio_nosync(const struct hstate *h, struct folio *folio);
 void hugetlb_vmemmap_optimize_folios(struct hstate *h, struct list_head *folio_list);
 void hugetlb_vmemmap_optimize_bootmem_folios(struct hstate *h, struct list_head *folio_list);
 #ifdef CONFIG_SPARSEMEM_VMEMMAP_PREINIT
@@ -65,6 +66,10 @@ static inline long hugetlb_vmemmap_restore_folios(const struct hstate *h,
 }
 
 static inline void hugetlb_vmemmap_optimize_folio(const struct hstate *h, struct folio *folio)
+{
+}
+
+static inline void hugetlb_vmemmap_optimize_folio_nosync(const struct hstate *h, struct folio *folio)
 {
 }
 
