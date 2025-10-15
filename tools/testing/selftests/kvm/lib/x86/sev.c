@@ -33,7 +33,7 @@ static void encrypt_region(struct kvm_vm *vm, struct userspace_mem_region *regio
 		const uint64_t offset = (i - lowest_page_in_region) * vm->page_size;
 
 		if (private)
-			vm_mem_set_private(vm, gpa_base + offset, size);
+			vm_mem_set_private(vm, gpa_base + offset, size, 0);
 
 		if (is_sev_snp_vm(vm))
 			snp_launch_update_data(vm, gpa_base + offset,

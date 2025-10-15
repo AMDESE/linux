@@ -506,7 +506,7 @@ static void test_guest_private_mem(void)
 		   fd, 0, 0);
 
 	virt_map(vm, gpa, gpa, npages);
-	vm_mem_set_private(vm, gpa, page_size);
+	vm_mem_set_private(vm, gpa, page_size, 0);
 
 	vcpu_args_set(vcpu, 1, gpa);
 	vcpu_run(vcpu);
