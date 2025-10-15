@@ -65,8 +65,13 @@ static void gmem_conversions_do_setup(test_data_t *t, int nr_pages,
 
 static void gmem_conversions_do_teardown(test_data_t *t)
 {
+	/* Use NULL to avoid second free in FIXTURE_TEARDOWN (multipage tests). */
+	if (!t->vcpu)
+		return;
+
 	/* No need to close gmem_fd, it's owned by the VM structure. */
 	kvm_vm_free(t->vcpu->vm);
+	t->vcpu = NULL;
 }
 
 FIXTURE_TEARDOWN(gmem_conversions)
@@ -104,6 +109,29 @@ static void __gmem_conversions_##test(test_data_t *t, int nr_pages)		\
 
 #define GMEM_CONVERSION_TEST_INIT_SHARED(test)					\
 	__GMEM_CONVERSION_TEST_INIT_SHARED(test, 1)
+
+/*
+ * Repeats test over nr_pages in a guest_memfd of size nr_pages, providing each
+ * test iteration with test_page, the index of the page under test in
+ * guest_memfd. test_page takes values 0..(nr_pages - 1) inclusive.
+ */
+#define GMEM_CONVERSION_MULTIPAGE_TEST_INIT_SHARED(test, __nr_pages)		\
+static void __gmem_conversions_multipage_##test(test_data_t *t, int nr_pages,	\
+						const int test_page);		\
+										\
+TEST_F(gmem_conversions, test)							\
+{										\
+	const uint64_t flags = GUEST_MEMFD_FLAG_MMAP | GUEST_MEMFD_FLAG_INIT_SHARED; \
+	int i;									\
+										\
+	for (i = 0; i < __nr_pages; ++i) {					\
+		gmem_conversions_do_setup(self, __nr_pages, flags);		\
+		__gmem_conversions_multipage_##test(self, __nr_pages, i);	\
+		gmem_conversions_do_teardown(self);				\
+	}									\
+}										\
+static void __gmem_conversions_multipage_##test(test_data_t *t, int nr_pages,	\
+						const int test_page)
 
 struct guest_check_data {
 	void *mem;
@@ -203,6 +231,48 @@ GMEM_CONVERSION_TEST_INIT_SHARED(init_shared)
 	test_shared(t, 0, 0, 'A', 'B');
 	test_convert_to_private(t, 0, 'B', 'C');
 	test_convert_to_shared(t, 0, 'C', 'D', 'E');
+}
+
+/*
+ * Test indexing of pages within guest_memfd, using test data that is a multiple
+ * of page index.
+ */
+GMEM_CONVERSION_MULTIPAGE_TEST_INIT_SHARED(indexing, 4)
+{
+	int i;
+
+	/* Get a char that varies with both i and v. */
+#define f(x, v) ((x << 4) + (v))
+#define r(v) (f(i, v))
+#define c(v) (f(test_page, v))
+
+	/*
+	 * Start with the highest index, to catch any errors when, perhaps, the
+	 * first page is returned even for the last index.
+	 */
+	for (i = nr_pages - 1; i >= 0; --i)
+		test_shared(t, i, 0, r(0), r(2));
+
+	test_convert_to_private(t, test_page, c(2), c(3));
+
+	for (i = 0; i < nr_pages; ++i) {
+		if (i == test_page)
+			test_private(t, i, r(3), r(4));
+		else
+			test_shared(t, i, r(2), r(3), r(4));
+	}
+
+	test_convert_to_shared(t, test_page, c(4), c(5), c(6));
+
+	for (i = 0; i < nr_pages; ++i) {
+		char expected = i == test_page ? r(6) : r(4);
+
+		test_shared(t, i, expected, r(7), r(8));
+	}
+
+#undef c
+#undef r
+#undef f
 }
 
 int main(int argc, char *argv[])
