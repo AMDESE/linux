@@ -814,14 +814,17 @@ int kvm_gmem_get_pfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_gmem_get_pfn);
 
 #ifdef CONFIG_HAVE_KVM_ARCH_GMEM_POPULATE
+
+#define GMEM_GUP_NPAGES (1UL << PMD_ORDER)
+
 long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long npages,
 		       kvm_gmem_populate_cb post_populate, void *opaque)
 {
 	struct kvm_memory_slot *slot;
-	void __user *p;
-
+	struct page **src_pages;
 	int ret = 0, max_order;
-	long i;
+	loff_t src_offset = 0;
+	long i, src_npages;
 
 	lockdep_assert_held(&kvm->slots_lock);
 
@@ -836,9 +839,28 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 	if (!file)
 		return -EFAULT;
 
+	npages = min_t(ulong, slot->npages - (start_gfn - slot->base_gfn), npages);
+	npages = min_t(ulong, npages, GMEM_GUP_NPAGES);
+
+	if (src) {
+		src_npages = IS_ALIGNED((unsigned long)src, PAGE_SIZE) ? npages : npages + 1;
+
+		src_pages = kmalloc_array(src_npages, sizeof(struct page *), GFP_KERNEL);
+		if (!src_pages)
+			return -ENOMEM;
+
+		ret = get_user_pages_fast((unsigned long)src, src_npages, 0, src_pages);
+		if (ret < 0)
+			return ret;
+
+		if (ret != src_npages)
+			return -ENOMEM;
+
+		src_offset = (loff_t)(src - PTR_ALIGN_DOWN(src, PAGE_SIZE));
+	}
+
 	filemap_invalidate_lock(file->f_mapping);
 
-	npages = min_t(ulong, slot->npages - (start_gfn - slot->base_gfn), npages);
 	for (i = 0; i < npages; i += (1 << max_order)) {
 		struct folio *folio;
 		gfn_t gfn = start_gfn + i;
@@ -869,8 +891,8 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 			max_order--;
 		}
 
-		p = src ? src + i * PAGE_SIZE : NULL;
-		ret = post_populate(kvm, gfn, pfn, p, max_order, opaque);
+		ret = post_populate(kvm, gfn, pfn, src ? &src_pages[i] : NULL,
+				    src_offset, max_order, opaque);
 		if (!ret)
 			folio_mark_uptodate(folio);
 
@@ -881,6 +903,14 @@ put_folio_and_exit:
 	}
 
 	filemap_invalidate_unlock(file->f_mapping);
+
+	if (src) {
+		long j;
+
+		for (j = 0; j < src_npages; j++)
+			put_page(src_pages[j]);
+		kfree(src_pages);
+	}
 
 	return ret && !i ? ret : i;
 }

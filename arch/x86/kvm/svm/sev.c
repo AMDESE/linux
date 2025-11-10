@@ -2260,7 +2260,8 @@ struct sev_gmem_populate_args {
 };
 
 static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pfn,
-				  void __user *src, int order, void *opaque)
+				  struct page **src_pages, loff_t src_offset,
+				  int order, void *opaque)
 {
 	struct sev_gmem_populate_args *sev_populate_args = opaque;
 	struct kvm_sev_info *sev = to_kvm_sev_info(kvm);
@@ -2268,7 +2269,7 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pf
 	int npages = (1 << order);
 	gfn_t gfn;
 
-	if (WARN_ON_ONCE(sev_populate_args->type != KVM_SEV_SNP_PAGE_TYPE_ZERO && !src))
+	if (WARN_ON_ONCE(sev_populate_args->type != KVM_SEV_SNP_PAGE_TYPE_ZERO && !src_pages))
 		return -EINVAL;
 
 	for (gfn = gfn_start, i = 0; gfn < gfn_start + npages; gfn++, i++) {
@@ -2284,14 +2285,21 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pf
 			goto err;
 		}
 
-		if (src) {
-			void *vaddr = kmap_local_pfn(pfn + i);
+		if (src_pages) {
+			void *src_vaddr = kmap_local_pfn(page_to_pfn(src_pages[i]));
+			void *dst_vaddr = kmap_local_pfn(pfn + i);
 
-			if (copy_from_user(vaddr, src + i * PAGE_SIZE, PAGE_SIZE)) {
-				ret = -EFAULT;
-				goto err;
+			memcpy(dst_vaddr, src_vaddr + src_offset, PAGE_SIZE - src_offset);
+			kunmap_local(src_vaddr);
+
+			if (src_offset) {
+				src_vaddr = kmap_local_pfn(page_to_pfn(src_pages[i + 1]));
+
+				memcpy(dst_vaddr + PAGE_SIZE - src_offset, src_vaddr, src_offset);
+				kunmap_local(src_vaddr);
 			}
-			kunmap_local(vaddr);
+
+			kunmap_local(dst_vaddr);
 		}
 
 		ret = rmp_make_private(pfn + i, gfn << PAGE_SHIFT, PG_LEVEL_4K,
@@ -2331,12 +2339,20 @@ fw_err:
 	if (!snp_page_reclaim(kvm, pfn + i) &&
 	    sev_populate_args->type == KVM_SEV_SNP_PAGE_TYPE_CPUID &&
 	    sev_populate_args->fw_error == SEV_RET_INVALID_PARAM) {
-		void *vaddr = kmap_local_pfn(pfn + i);
+		void *src_vaddr = kmap_local_pfn(page_to_pfn(src_pages[i]));
+		void *dst_vaddr = kmap_local_pfn(pfn + i);
 
-		if (copy_to_user(src + i * PAGE_SIZE, vaddr, PAGE_SIZE))
-			pr_debug("Failed to write CPUID page back to userspace\n");
+		memcpy(src_vaddr + src_offset, dst_vaddr, PAGE_SIZE - src_offset);
+		kunmap_local(src_vaddr);
 
-		kunmap_local(vaddr);
+		if (src_offset) {
+			src_vaddr = kmap_local_pfn(page_to_pfn(src_pages[i + 1]));
+
+			memcpy(src_vaddr, dst_vaddr + PAGE_SIZE - src_offset, src_offset);
+			kunmap_local(src_vaddr);
+		}
+
+		kunmap_local(dst_vaddr);
 	}
 
 	/* pfn + i is hypervisor-owned now, so skip below cleanup for it. */
