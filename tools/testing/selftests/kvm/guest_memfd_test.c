@@ -467,7 +467,7 @@ static void test_guest_memfd(unsigned long vm_type)
 	uint64_t flags;
 
 	flags = vm_check_cap(vm, KVM_CAP_GUEST_MEMFD_FLAGS);
-	test_guest_memfd_flags(vm, flags);
+	test_guest_memfd_flags(vm, flags | GUEST_MEMFD_FLAG_HUGETLB);
 
 	__test_guest_memfd(vm, 0);
 	if (flags & GUEST_MEMFD_FLAG_MMAP)
