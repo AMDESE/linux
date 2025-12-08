@@ -1396,6 +1396,7 @@ void mark_page_dirty(struct kvm *kvm, gfn_t gfn);
 
 int __kvm_vcpu_map(struct kvm_vcpu *vcpu, gpa_t gpa, struct kvm_host_map *map,
 		   bool writable);
+void __kvm_vcpu_unmap(struct kvm_vcpu *vcpu, struct kvm_host_map *map, bool track_dirty);
 void kvm_vcpu_unmap(struct kvm_vcpu *vcpu, struct kvm_host_map *map);
 
 static inline int kvm_vcpu_map(struct kvm_vcpu *vcpu, gpa_t gpa,
