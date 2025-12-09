@@ -2287,8 +2287,18 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn, kvm_pfn_t pfn,
 	int level;
 	int ret;
 
-	if (WARN_ON_ONCE(sev_populate_args->type != KVM_SEV_SNP_PAGE_TYPE_ZERO && !src_page))
+	/*
+	 * For vm_memory_attributes=1, in-place conversion/population is not
+	 * supported, so the initial contents necessarily need to come from a
+	 * separate src address. For vm_memory_attributes=0, this isn't
+	 * necessarily the case, since the pages may have been populated
+	 * directly from userspace before calling KVM_SEV_SNP_LAUNCH_UPDATE.
+	 */
+#ifdef CONFIG_KVM_VM_MEMORY_ATTRIBUTES
+	if (vm_memory_attributes &&
+	    sev_populate_args->type != KVM_SEV_SNP_PAGE_TYPE_ZERO && !src_page)
 		return -EINVAL;
+#endif
 
 	ret = snp_lookup_rmpentry((u64)pfn, &assigned, &level);
 	if (ret || assigned) {
@@ -2367,8 +2377,8 @@ static int snp_launch_update(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	if (copy_from_user(&params, u64_to_user_ptr(argp->data), sizeof(params)))
 		return -EFAULT;
 
-	pr_debug("%s: GFN start 0x%llx length 0x%llx type %d flags %d\n", __func__,
-		 params.gfn_start, params.len, params.type, params.flags);
+	pr_debug("%s: GFN start 0x%llx length 0x%llx type %d flags %d src %llx\n", __func__,
+		 params.gfn_start, params.len, params.type, params.flags, params.uaddr);
 
 	if (!params.len || !PAGE_ALIGNED(params.len) || params.flags ||
 	    (params.type != KVM_SEV_SNP_PAGE_TYPE_NORMAL &&
@@ -2425,7 +2435,7 @@ static int snp_launch_update(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	} else {
 		params.gfn_start += count;
 		params.len -= count * PAGE_SIZE;
-		if (params.type != KVM_SEV_SNP_PAGE_TYPE_ZERO)
+		if (src && params.type != KVM_SEV_SNP_PAGE_TYPE_ZERO)
 			params.uaddr += count * PAGE_SIZE;
 
 		ret = 0;

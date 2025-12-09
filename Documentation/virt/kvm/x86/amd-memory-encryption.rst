@@ -503,7 +503,12 @@ secrets.
 
 It is required that the GPA ranges initialized by this command have had the
 KVM_MEMORY_ATTRIBUTE_PRIVATE attribute set in advance. See the documentation
-for KVM_SET_MEMORY_ATTRIBUTES for more details on this aspect.
+for KVM_SET_MEMORY_ATTRIBUTES/KVM_SET_MEMORY_ATTRIBUTES2 for more details on
+this aspect. If running with kvm.vm_memory_attributes=0 (to allow for
+guest_memfd to handle memory attributes and allow for in-place conversion of
+pages between shared/private), the 'PRESERVED' flag/content mode (which is
+only available via the KVM_SET_MEMORY_ATTRIBUTES2 interface) must be used
+when setting the range to private prior to issuing this ioctl.
 
 Upon success, this command is not guaranteed to have processed the entire
 range requested. Instead, the ``gfn_start``, ``uaddr``, and ``len`` fields of
@@ -511,9 +516,15 @@ range requested. Instead, the ``gfn_start``, ``uaddr``, and ``len`` fields of
 remaining range that has yet to be processed. The caller should continue
 calling this command until those fields indicate the entire range has been
 processed, e.g. ``len`` is 0, ``gfn_start`` is equal to the last GFN in the
-range plus 1, and ``uaddr`` is the last byte of the userspace-provided source
-buffer address plus 1. In the case where ``type`` is KVM_SEV_SNP_PAGE_TYPE_ZERO,
-``uaddr`` will be ignored completely.
+range plus 1, and ``uaddr`` (if specified) is the last byte of the
+userspace-provided source buffer address plus 1.
+
+In the case where ``type`` is KVM_SEV_SNP_PAGE_TYPE_ZERO, ``uaddr`` will be
+ignored completely. Otherwise, ``uaddr`` is required if
+kvm.vm_memory_attributes=0 and optional if kvm.vm_memory_attributes=1, since
+in the latter case guest memory can be initialized directly from userspace
+prior to converting it to private and passing the GPA range on to this
+interface.
 
 Parameters (in): struct  kvm_sev_snp_launch_update
 
