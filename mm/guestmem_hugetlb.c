@@ -361,9 +361,7 @@ static void guestmem_hugetlb_merge_folio(struct folio *first_folio)
 	 * entries that modify the ->lru field values (such as other
 	 * folios being added/removed from h->hugepage_activelist).
 	 */
-	hugetlb_do_lock();
 	hugetlb_vmemmap_optimize_folio_nosync(h, first_folio);
-	hugetlb_do_unlock();
 }
 
 static struct folio *guestmem_hugetlb_maybe_merge_folio(struct folio *folio)
