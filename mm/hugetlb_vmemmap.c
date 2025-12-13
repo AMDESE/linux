@@ -45,10 +45,6 @@ struct vmemmap_remap_walk {
 #define VMEMMAP_REMAP_NO_TLB_FLUSH	BIT(1)
 /* synchronize_rcu() to avoid writes from page_ref_add_unless() */
 #define VMEMMAP_SYNCHRONIZE_RCU		BIT(2)
-/* acquire the hugetlb lock before remapping PTE */
-#define VMEMMAP_REMAP_HUGETLB_LOCK		BIT(3)
-/* defer the TLB flush until after hugetlb is dropped */
-#define VMEMMAP_REMAP_TLB_FLUSH_AFTER_LOCK	BIT(4)
 	unsigned long		flags;
 };
 
@@ -583,10 +579,6 @@ static int __hugetlb_vmemmap_optimize_folio(const struct hstate *h,
 
 	if (flags & VMEMMAP_SYNCHRONIZE_RCU)
 		synchronize_rcu();
-
-	if (flags & VMEMMAP_REMAP_HUGETLB_LOCK)
-		hugetlb_do_lock();
-
 	/*
 	 * Very Subtle
 	 * If VMEMMAP_REMAP_NO_TLB_FLUSH is set, TLB flushing is not performed
@@ -617,12 +609,6 @@ static int __hugetlb_vmemmap_optimize_folio(const struct hstate *h,
 		folio_clear_hugetlb_vmemmap_optimized(folio);
 	}
 
-	if (flags & VMEMMAP_REMAP_HUGETLB_LOCK)
-		hugetlb_do_unlock();
-
-	if (flags & VMEMMAP_REMAP_TLB_FLUSH_AFTER_LOCK)
-		flush_tlb_kernel_range(vmemmap_reuse, vmemmap_end);
-
 	return ret;
 }
 
@@ -648,10 +634,8 @@ void hugetlb_vmemmap_optimize_folio_nosync(const struct hstate *h, struct folio 
 {
 	LIST_HEAD(vmemmap_pages);
 
-	__hugetlb_vmemmap_optimize_folio(h, folio, &vmemmap_pages,
-					 VMEMMAP_REMAP_HUGETLB_LOCK|VMEMMAP_REMAP_TLB_FLUSH_AFTER_LOCK);
+	__hugetlb_vmemmap_optimize_folio(h, folio, &vmemmap_pages, 0);
 	free_vmemmap_page_list(&vmemmap_pages);
-
 }
 
 static int hugetlb_vmemmap_split_folio(const struct hstate *h, struct folio *folio)
