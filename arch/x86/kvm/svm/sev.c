@@ -3165,8 +3165,15 @@ out:
 	    cpu_feature_enabled(X86_FEATURE_NO_NESTED_DATA_BP))
 		sev_supported_vmsa_features |= SVM_SEV_FEAT_DEBUG_SWAP;
 
-	if (sev_snp_enabled && tsc_khz && cpu_feature_enabled(X86_FEATURE_SNP_SECURE_TSC))
+	if (!sev_snp_enabled)
+		return;
+	/* the following feature bit checks are SNP specific */
+
+	if (tsc_khz && cpu_feature_enabled(X86_FEATURE_SNP_SECURE_TSC))
 		sev_supported_vmsa_features |= SVM_SEV_FEAT_SECURE_TSC;
+
+	if (cpu_feature_enabled(X86_FEATURE_IBPB_ON_ENTRY))
+		sev_supported_vmsa_features |= SVM_SEV_FEAT_IBPB_ON_ENTRY;
 }
 
 void sev_hardware_unsetup(void)
