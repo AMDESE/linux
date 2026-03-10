@@ -2492,12 +2492,13 @@ config MITIGATION_IBPB_ENTRY
 
 config MITIGATION_IBRS_ENTRY
 	bool "Enable IBRS on kernel entry"
-	depends on CPU_SUP_INTEL && X86_64
+	depends on X86_64
 	default y
 	help
 	  Compile the kernel with support for the spectre_v2=ibrs mitigation.
-	  This mitigates both spectre_v2 and retbleed at great cost to
-	  performance.
+	  This mitigates spectre_v2 at great cost to performance.  On Intel,
+	  it also mitigates retbleed.  On AMD/Hygon, retbleed mitigation
+	  requires MITIGATION_UNRET_ENTRY or MITIGATION_IBPB_ENTRY.
 
 config MITIGATION_SRSO
 	bool "Mitigate speculative RAS overflow on AMD"

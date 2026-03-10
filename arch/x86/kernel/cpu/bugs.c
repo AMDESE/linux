@@ -1305,7 +1305,14 @@ static void __init retbleed_update_mitigation(void)
 
 	/*
 	 * Let IBRS trump all on Intel without affecting the effects of the
-	 * retbleed= cmdline option except for call depth based stuffing
+	 * retbleed= cmdline option except for call depth based stuffing.
+	 *
+	 * On AMD/Hygon, legacy SPEC_CTRL.IBRS toggling does not mitigate the
+	 * Branch Type Confusion RETBleed variant: RET prediction comes from
+	 * the Return Address Predictor, not the restricted indirect branch
+	 * predictors that IBRS controls.  So keep this Intel-only and leave
+	 * AMD's software return-thunk mitigation (UNRET/IBPB) in place even
+	 * when spectre_v2=ibrs is selected.
 	 */
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) {
 		switch (spectre_v2_enabled) {
@@ -2164,11 +2171,6 @@ static void __init spectre_v2_select_mitigation(void)
 		spectre_v2_cmd = SPECTRE_V2_CMD_AUTO;
 	}
 
-	if (spectre_v2_cmd == SPECTRE_V2_CMD_IBRS && boot_cpu_data.x86_vendor != X86_VENDOR_INTEL) {
-		pr_err("IBRS selected but not Intel CPU. Switching to AUTO select\n");
-		spectre_v2_cmd = SPECTRE_V2_CMD_AUTO;
-	}
-
 	if (spectre_v2_cmd == SPECTRE_V2_CMD_IBRS && !boot_cpu_has(X86_FEATURE_IBRS)) {
 		pr_err("IBRS selected but CPU doesn't have IBRS. Switching to AUTO select\n");
 		spectre_v2_cmd = SPECTRE_V2_CMD_AUTO;
@@ -2297,13 +2299,26 @@ static void __init spectre_v2_apply_mitigation(void)
 	if (spectre_v2_enabled == SPECTRE_V2_EIBRS && unprivileged_ebpf_enabled())
 		pr_err(SPECTRE_V2_EIBRS_EBPF_MSG);
 
-	if (spectre_v2_in_ibrs_mode(spectre_v2_enabled)) {
-		if (boot_cpu_has(X86_FEATURE_AUTOIBRS)) {
+	/*
+	 * head_64.S preserves EFER.AUTOIBRS across boot, so a kexec from a
+	 * kernel that ran in AutoIBRS mode carries the bit into the new kernel.
+	 * Explicitly set or clear it to match the selected mitigation, regardless
+	 * of which mode is in effect.  The boot CPU does this before
+	 * init_real_mode() snapshots EFER for the AP trampoline, so APs inherit
+	 * the correct value too.
+	 */
+	if (boot_cpu_has(X86_FEATURE_AUTOIBRS)) {
+		if (spectre_v2_in_eibrs_mode(spectre_v2_enabled))
 			msr_set_bit(MSR_EFER, _EFER_AUTOIBRS);
-		} else {
-			x86_spec_ctrl_base |= SPEC_CTRL_IBRS;
-			update_spec_ctrl(x86_spec_ctrl_base);
-		}
+		else
+			msr_clear_bit(MSR_EFER, _EFER_AUTOIBRS);
+	}
+
+	if (spectre_v2_in_ibrs_mode(spectre_v2_enabled) &&
+	    !(boot_cpu_has(X86_FEATURE_AUTOIBRS) &&
+	      spectre_v2_in_eibrs_mode(spectre_v2_enabled))) {
+		x86_spec_ctrl_base |= SPEC_CTRL_IBRS;
+		update_spec_ctrl(x86_spec_ctrl_base);
 	}
 
 	if (spectre_v2_in_eibrs_mode(spectre_v2_enabled) &&
