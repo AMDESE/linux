@@ -677,6 +677,19 @@ u64 __weak kvm_arch_gmem_supported_content_modes(struct kvm *kvm)
 	return 0;
 }
 
+static bool kvm_gmem_content_mode_is_supported(struct kvm *kvm,
+					       u64 content_mode,
+					       bool to_private)
+{
+	if (content_mode == KVM_SET_MEMORY_ATTRIBUTES2_MODE_UNSPECIFIED)
+		return true;
+
+	if (content_mode == KVM_SET_MEMORY_ATTRIBUTES2_ZERO && to_private)
+		return false;
+
+	return kvm_arch_gmem_supported_content_modes(kvm) & content_mode;
+}
+
 int kvm_gmem_apply_content_mode_zero(struct inode *inode, pgoff_t start,
 				     pgoff_t end)
 {
@@ -736,8 +749,26 @@ int __weak kvm_arch_gmem_apply_content_mode_preserve(struct kvm *kvm,
 	return -EOPNOTSUPP;
 }
 
+static int kvm_gmem_apply_content_mode(struct kvm *kvm, uint64_t content_mode,
+				       struct inode *inode, pgoff_t start,
+				       pgoff_t end)
+{
+	switch (content_mode) {
+	case KVM_SET_MEMORY_ATTRIBUTES2_MODE_UNSPECIFIED:
+		return kvm_arch_gmem_apply_content_mode_unspecified(kvm, inode, start, end);
+	case KVM_SET_MEMORY_ATTRIBUTES2_ZERO:
+		return kvm_arch_gmem_apply_content_mode_zero(kvm, inode, start, end);
+	case KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE:
+		return kvm_arch_gmem_apply_content_mode_preserve(kvm, inode, start, end);
+	default:
+		WARN_ONCE(1, "Unexpected policy requested.");
+		return -EOPNOTSUPP;
+	}
+}
+
 static int __kvm_gmem_set_attributes(struct inode *inode, pgoff_t start,
 				     size_t nr_pages, uint64_t attrs,
+				     struct kvm *kvm, uint64_t content_mode,
 				     pgoff_t *err_index)
 {
 	bool to_private = attrs & KVM_MEMORY_ATTRIBUTE_PRIVATE;
@@ -752,9 +783,23 @@ static int __kvm_gmem_set_attributes(struct inode *inode, pgoff_t start,
 
 	filemap_invalidate_lock(mapping);
 
+	if (!kvm_gmem_content_mode_is_supported(kvm, content_mode,
+						to_private)) {
+		r = -EOPNOTSUPP;
+		*err_index = start;
+		goto out;
+	}
+
 	mas_init(&mas, mt, start);
 
 	if (kvm_gmem_range_has_attributes(mt, start, nr_pages, attrs)) {
+		/*
+		 * Even if no update is required to attributes, the
+		 * requested content mode is applied.
+		 */
+		WARN_ON(kvm_gmem_apply_content_mode(kvm, content_mode,
+						    inode, start, end));
+
 		r = 0;
 		goto out;
 	}
@@ -786,6 +831,9 @@ static int __kvm_gmem_set_attributes(struct inode *inode, pgoff_t start,
 	if (!to_private)
 		kvm_gmem_invalidate(inode, start, end);
 
+	WARN_ON(kvm_gmem_apply_content_mode(kvm, content_mode, inode,
+					    start, end));
+
 	mas_store_prealloc(&mas, xa_mk_value(attrs));
 
 	kvm_gmem_invalidate_end(inode, start, end);
@@ -807,7 +855,11 @@ static long kvm_gmem_set_attributes(struct file *file, void __user *argp)
 	if (copy_from_user(&attrs, argp, sizeof(attrs)))
 		return -EFAULT;
 
-	if (attrs.flags)
+	if (attrs.flags & ~(KVM_SET_MEMORY_ATTRIBUTES2_ZERO |
+			    KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE))
+		return -EINVAL;
+	if ((attrs.flags & KVM_SET_MEMORY_ATTRIBUTES2_ZERO) &&
+	    (attrs.flags & KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE))
 		return -EINVAL;
 	if (attrs.error_offset)
 		return -EINVAL;
@@ -829,7 +881,7 @@ static long kvm_gmem_set_attributes(struct file *file, void __user *argp)
 	nr_pages = attrs.size >> PAGE_SHIFT;
 	index = attrs.offset >> PAGE_SHIFT;
 	r = __kvm_gmem_set_attributes(inode, index, nr_pages, attrs.attributes,
-				      &err_index);
+				      f->kvm, attrs.flags, &err_index);
 	if (r) {
 		attrs.error_offset = ((uint64_t)err_index) << PAGE_SHIFT;
 

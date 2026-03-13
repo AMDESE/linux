@@ -6571,6 +6571,8 @@ Errors:
   EAGAIN     Some page within requested range had unexpected refcounts. The
              offset of the page will be returned in `error_offset`.
   ENOMEM     Ran out of memory trying to track private/shared state
+  EOPNOTSUPP There is no way for KVM to guarantee in-memory contents as
+             requested.
   ========== ===============================================================
 
 KVM_SET_MEMORY_ATTRIBUTES2 is an extension to
@@ -6618,6 +6620,65 @@ Userspace is expected to figure out how to remove all known refcounts
 on the shared pages, such as refcounts taken by get_user_pages(), and
 try the ioctl again. A possible source of these long term refcounts is
 if the guest_memfd memory was pinned in IOMMU page tables.
+
+By default, KVM makes no guarantees about the in-memory values after
+memory is convert to/from shared/private.  Optionally, userspace may
+instruct KVM to ensure the contents of memory are zeroed or preserved,
+e.g. to enable in-place sharing of data, or as an optimization to
+avoid having to re-zero memory when userspace could have relied on the
+trusted entity to guarantee the memory will be zeroed as part of the
+entire conversion process.
+
+The content modes available are as follows:
+
+``KVM_SET_MEMORY_ATTRIBUTES2_ZERO``
+
+  On conversion, KVM guarantees all entities that have "allowed"
+  access to the memory will read zeros.  E.g. on private to shared
+  conversion, both trusted and untrusted code will read zeros.
+
+  Zeroing is currently only supported for private-to-shared
+  conversions, as KVM in general is untrusted and thus cannot
+  guarantee the guest (or any trusted entity) will read zeros after
+  conversion.  Note, some CoCo implementations do zero memory contents
+  such that the guest reads zeros after conversion, and the guest may
+  choose to rely on that behavior.  However, that's a contract between
+  the trusted CoCo entity and the guest, not between KVM and the
+  guest.
+
+``KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE``
+
+  On conversion, KVM guarantees memory contents will be preserved with
+  respect to the last written unencrypted value.  As a concrete
+  example, if the host writes ``0xbeef`` to shared memory and converts
+  the memory to private, the guest will also read ``0xbeef``, even if
+  the in-memory data is encrypted as part of the conversion.  And vice
+  versa, if the guest writes ``0xbeef`` to private memory and then
+  converts the memory to shared, the host (and guest) will read
+  ``0xbeef`` (if the memory is accessible).
+
+Note: These content modes apply to the entire requested range, not
+just the parts of the range that underwent conversion. For example, if
+this was the initial state:
+
+  * [0x0000, 0x1000): shared
+  * [0x1000, 0x2000): private
+  * [0x2000, 0x3000): shared
+
+and range [0x0000, 0x3000) was set to shared, the content mode would
+apply to all memory in [0x0000, 0x3000), not just the range that
+underwent conversion [0x1000, 0x2000).
+
+Note: These content modes apply only to allocated memory. No
+guarantees are made on offset ranges that do not have memory allocated
+(yet). For example, if this was the initial state:
+
+  * [0x0000, 0x1000): shared
+  * [0x1000, 0x2000): not allocated
+  * [0x2000, 0x3000): shared
+
+and range [0x0000, 0x3000) was set to shared, the content mode would
+apply to only to offset ranges [0x0000, 0x1000) and [0x2000, 0x3000).
 
 See also: :ref: `KVM_SET_MEMORY_ATTRIBUTES`.
 
