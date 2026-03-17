@@ -512,6 +512,34 @@ GMEM_CONVERSION_TEST_INIT_SHARED(convert_to_private_does_not_support_zero)
 	TEST_ASSERT_EQ(error_offset, start_offset);
 }
 
+GMEM_CONVERSION_TEST_INIT_SHARED(convert_mode_unspecified_scrambles)
+{
+	loff_t error_offset = -1ul;
+	int ret;
+
+	test_shared(t, 0, 0, 'A', 'B');
+	ret = __gmem_set_private(t->gmem_fd, 0, nr_pages * page_size,
+				 &error_offset, 0);
+	TEST_ASSERT_EQ(ret, 0);
+	TEST_ASSERT_EQ(error_offset, -1ul);
+
+	/*
+	 * Since the content mode 0 scrambles data in memory, there is
+	 * a small chance that this test will falsely fail when the
+	 * scrambled value matches the initial value.
+	 */
+	run_guest_do_rmw(t->vcpu, 0, 'B', 'C', true);
+
+	ret = __gmem_set_shared(t->gmem_fd, 0, nr_pages * page_size,
+				&error_offset, 0);
+	TEST_ASSERT_EQ(ret, 0);
+	TEST_ASSERT_EQ(error_offset, -1ul);
+
+	/* Same small chance of falsely failing test applies here. */
+	TEST_ASSERT(READ_ONCE(t->mem[0]) != 'C',
+		    "Conversion without specifying mode should scramble memory.");
+}
+
 int main(int argc, char *argv[])
 {
 	TEST_REQUIRE(kvm_check_cap(KVM_CAP_VM_TYPES) & BIT(KVM_X86_SW_PROTECTED_VM));
