@@ -488,6 +488,21 @@ GMEM_CONVERSION_MULTIPAGE_TEST_INIT_SHARED(elevated_refcount, 4)
 	}
 }
 
+GMEM_CONVERSION_TEST_INIT_SHARED(convert_to_private_does_not_support_zero)
+{
+	const loff_t start_offset = 0;
+	loff_t error_offset = -1ul;
+	int ret;
+
+	ret = __gmem_set_private(t->gmem_fd, start_offset, nr_pages * page_size,
+				 &error_offset,
+				 KVM_SET_MEMORY_ATTRIBUTES2_ZERO);
+
+	TEST_ASSERT_EQ(ret, -1);
+	TEST_ASSERT_EQ(errno, EOPNOTSUPP);
+	TEST_ASSERT_EQ(error_offset, start_offset);
+}
+
 int main(int argc, char *argv[])
 {
 	TEST_REQUIRE(kvm_check_cap(KVM_CAP_VM_TYPES) & BIT(KVM_X86_SW_PROTECTED_VM));
