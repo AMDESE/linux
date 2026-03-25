@@ -883,13 +883,12 @@ static struct folio *guest_memfd_get_pfn(struct file *file, unsigned long index,
 		return NULL;
 
 	folio = kvm_gmem_get_folio(inode, index);
-	if (!folio)
+	if (IS_ERR(folio))
 		return NULL;
 
 	*pfn = folio_pfn(folio) + (index & (folio_nr_pages(folio) - 1));
 	*max_order = folio_order(folio);
 
-	folio_put(folio);
 	folio_unlock(folio);
 
 	return folio;
@@ -928,7 +927,7 @@ static long pin_guest_memfd_pages(struct pfn_reader_user *user, loff_t start, un
 		user->ufolios[i] = folio;
 
 		if (upages) {
-			unsigned long np = (1UL << (max_order + PAGE_SHIFT)) - offset_in_folio(folio, uptr);
+			unsigned long np = folio_nr_pages(folio) - (offset_in_folio(folio, uptr) >> PAGE_SHIFT);
 
 			for (unsigned long j = 0; j < np; ++j)
 				*upages++ = folio_page(folio, offset + j);
@@ -1002,8 +1001,6 @@ static int pfn_reader_user_pin(struct pfn_reader_user *user,
 		if (is_guest_memfd(pages)) {
 			rc = pin_guest_memfd_pages(user, start, npages);
 		} else {
-			pr_err("UNEXP PINFD start=%lx sz=%lx file=%lx",
-			       start, npages << PAGE_SHIFT, (ulong)pages->file);
 			rc = pin_memfd_pages(user, start, npages);
 		}
 	} else if (!remote_mm) {
