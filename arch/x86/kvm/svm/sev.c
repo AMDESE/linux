@@ -4833,6 +4833,10 @@ static int next_shared_offset(struct kvm *kvm, kvm_pfn_t pfn_start, long npages_
 		pfn += PHYS_PFN(page_level_size(level));
 	}
 
+	/* Clamp to the requested range. */
+	if (*npages_shared > npages_max - *offset)
+		*npages_shared = npages_max - *offset;
+
 	if (!*npages_shared)
 		*offset = npages_max;
 
