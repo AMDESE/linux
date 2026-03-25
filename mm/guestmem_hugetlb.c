@@ -432,7 +432,7 @@ static void spool_release_cb(struct hugepage_subpool *spool, void *data)
 	struct guestmem_hugetlb_private *private = data;
 
 	pr_debug_ratelimited("%s: called for spool %px data %px\n", __func__, spool, data);
-	private->spool_active = false;
+	WRITE_ONCE(private->spool_active, false);
 }
 
 static void *guestmem_hugetlb_setup(size_t size, u64 flags)
@@ -484,7 +484,7 @@ static void *guestmem_hugetlb_setup(size_t size, u64 flags)
 	private->h = h;
 	private->spool = spool;
 	private->h_cg_rsvd = h_cg_rsvd;
-	private->spool_active = true;
+	WRITE_ONCE(private->spool_active, true);
 
 	atomic_set(&private->teardown_count, 0);
 
@@ -512,7 +512,7 @@ static void teardown_finalize(struct guestmem_hugetlb_private *private)
 	pr_debug("%s: waiting for subpool pages to be freed for instance %px inode_size %ld\n",
 		 __func__, private, private->inode_size);
 
-	while (private->spool_active)
+	while (READ_ONCE(private->spool_active))
 		cond_resched();
 
 	pr_debug("%s: finalizing instance %px\n", __func__, private);
