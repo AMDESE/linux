@@ -841,7 +841,7 @@ static int kvm_gmem_restructure_folios_in_range(struct inode *inode,
 	pgoff_t index;
 	pgoff_t end;
 	void *priv;
-	int ret;
+	int ret = 0;
 
 	if (!kvm_gmem_has_custom_allocator(inode))
 		return 0;
@@ -876,20 +876,24 @@ static int kvm_gmem_restructure_folios_in_range(struct inode *inode,
 	return ret;
 
 rollback:
-	for (index -= to_nr_pages; index >= start; index -= to_nr_pages) {
+	index -= to_nr_pages;
+	while (true) {
 		struct folio *f;
 
 		f = filemap_get_folio(inode->i_mapping, index);
-		if (IS_ERR(f))
-			continue;
+		if (!IS_ERR(f)) {
+			/* Leave just filemap's refcounts on the folio. */
+			folio_put(f);
 
-		/* Leave just filemap's refcounts on the folio. */
-		folio_put(f);
+			if (is_split_operation)
+				WARN_ON(kvm_gmem_merge_folio_in_filemap(inode, f));
+			else
+				WARN_ON(kvm_gmem_split_folio_in_filemap(inode, f));
+		}
 
-		if (is_split_operation)
-			WARN_ON(kvm_gmem_merge_folio_in_filemap(inode, f));
-		else
-			WARN_ON(kvm_gmem_split_folio_in_filemap(inode, f));
+		if (index == start)
+			break;
+		index -= to_nr_pages;
 	}
 
 	return ret;
