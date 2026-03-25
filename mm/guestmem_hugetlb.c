@@ -145,7 +145,7 @@ static int guestmem_hugetlb_stash_metadata(struct folio *folio)
 		stash = entry;
 		stash->split_count++;
 	} else {
-		stash = kzalloc(sizeof(*stash), 1);
+		stash = kzalloc(sizeof(*stash), GFP_KERNEL);
 		if (!stash)
 			return -ENOMEM;
 		pr_debug("%s: allocated stash for folio pfn %lx\n",
@@ -159,12 +159,12 @@ static int guestmem_hugetlb_stash_metadata(struct folio *folio)
 		xas_set_order(&xas, folio_pfn(folio), folio_order(folio));
 
 		xas_lock(&xas);
-		entry = xas_store(&xas, stash);
+		xas_store(&xas, stash);
 		xas_unlock(&xas);
 
-		if (xa_is_err(entry)) {
+		if (xas_error(&xas)) {
 			kfree(stash);
-			return xa_err(entry);
+			return xas_error(&xas);
 		}
 	}
 
