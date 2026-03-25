@@ -3036,8 +3036,7 @@ out_uncharge_cgroup_reservation:
 	if (charge_cgroup_rsvd)
 		hugetlb_cgroup_uncharge_cgroup_rsvd(idx, nr_pages, h_cg);
 out:
-	folio = ERR_PTR(-ENOSPC);
-	goto out;
+	return ERR_PTR(-ENOSPC);
 }
 
 /*
