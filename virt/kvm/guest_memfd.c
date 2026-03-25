@@ -1315,6 +1315,7 @@ static long kvm_gmem_truncate_inode_aligned_pages(struct inode *inode,
 static void kvm_gmem_zero_range(struct address_space *mapping,
 				pgoff_t start, pgoff_t end)
 {
+	pgoff_t orig_start = start;
 	struct folio_batch fbatch;
 
 	folio_batch_init(&fbatch);
@@ -1323,14 +1324,17 @@ static void kvm_gmem_zero_range(struct address_space *mapping,
 
 		for (i = 0; i < folio_batch_count(&fbatch); ++i) {
 			struct folio *f;
+			size_t start_offset;
 			size_t nr_bytes;
 
 			f = fbatch.folios[i];
+			start_offset = offset_in_folio(f, orig_start << PAGE_SHIFT);
 			nr_bytes = offset_in_folio(f, end << PAGE_SHIFT);
 			if (nr_bytes == 0)
 				nr_bytes = folio_size(f);
 
-			folio_zero_segment(f, 0, nr_bytes);
+			folio_zero_segment(f, start_offset, nr_bytes);
+			orig_start = folio_next_index(f);
 		}
 
 		folio_batch_release(&fbatch);
@@ -1448,7 +1452,7 @@ static long kvm_gmem_allocate(struct inode *inode, loff_t offset, loff_t len)
 		nr_pages = kvm_gmem_allocator_ops(inode)->nr_pages_in_folio(p);
 
 		start = round_down(start, nr_pages);
-		end = round_down(end, nr_pages);
+		end = round_up(end, nr_pages);
 	}
 
 	r = 0;
