@@ -656,9 +656,11 @@ static struct folio *guestmem_hugetlb_alloc_folio(void *priv, struct mempolicy *
 	 */
 	ret = hugepage_subpool_get_pages(private->spool, 1);
 	if (ret == -ENOMEM) {
+		mpol_cond_put(mpol);
 		return ERR_PTR(-EBUSY);
 	} else if (ret > 0) {
 		/* guest_memfd will not use surplus pages. */
+		mpol_cond_put(mpol);
 		goto err_put_pages;
 	}
 
