@@ -2383,7 +2383,7 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 	struct kvm_memory_slot *slot;
 	void __user *p;
 
-	int ret = 0, max_order;
+	int ret = 0, max_order = 0;
 	long i;
 
 	lockdep_assert_held(&kvm->slots_lock);
