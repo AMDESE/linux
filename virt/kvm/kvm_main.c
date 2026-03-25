@@ -1276,6 +1276,8 @@ void kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *da
 	struct kvm_finalize_work *fwork;
 
 	fwork = kzalloc(sizeof(*fwork), GFP_KERNEL_ACCOUNT);
+	if (!fwork)
+		return;
 	fwork->fn = fn;
 	fwork->data = data;
 
@@ -1291,6 +1293,7 @@ static void kvm_finalize(struct kvm *kvm)
 	mutex_lock(&kvm->lock);
 	list_for_each_entry_safe(fwork, tmp, &kvm->finalize_work_list, list) {
 		fwork->fn(fwork->data);
+		list_del(&fwork->list);
 		kfree(fwork);
 	}
 	mutex_unlock(&kvm->lock);
