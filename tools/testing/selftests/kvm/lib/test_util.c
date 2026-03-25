@@ -354,7 +354,7 @@ int get_backing_src_madvise_advice(uint32_t i)
 	case VM_MEM_SRC_SHMEM:
 		return MADV_NOHUGEPAGE;
 	case VM_MEM_SRC_ANONYMOUS_THP:
-		return MADV_NOHUGEPAGE;
+		return MADV_HUGEPAGE;
 	default:
 		return 0;
 	}
