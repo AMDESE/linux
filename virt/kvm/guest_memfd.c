@@ -1050,10 +1050,9 @@ repeat:
 		 * flag is set.
 		 */
 		if (!folio_test_uptodate(folio)) {
-			pr_debug("%s: cpu %d inode %px retrying lock for non-uptodate index %lx\n",
-				 __func__, smp_processor_id(), inode, index);
 			folio_unlock(folio);
 			folio_put(folio);
+			cond_resched();
 			goto repeat;
 		}
 
@@ -1069,8 +1068,7 @@ repeat:
 		folio = kvm_gmem_allocator_ops(inode)->alloc_folio(p, policy);
 		if (IS_ERR(folio)) {
 			if (PTR_ERR(folio) == -EBUSY) {
-				pr_debug("%s: cpu %d inode %px retrying allocation for index %lx\n",
-					 __func__, smp_processor_id(), inode, index);
+				cond_resched();
 				goto repeat;
 			}
 			return folio;
