@@ -2380,7 +2380,7 @@ static nodemask_t *policy_mbind_nodemask(gfp_t gfp)
  * Return: the number of surplus pages required to meet the @requested number of
  *         hugetlb pages.
  */
-static int hugetlb_hstate_reserve_pages(struct hstate *h, long requested)
+static long hugetlb_hstate_reserve_pages(struct hstate *h, long requested)
 	__must_hold(&hugetlb_lock)
 {
 	long needed;
