@@ -2621,7 +2621,7 @@ static inline void kvm_disable_virtualization(void) { }
  * in particular, that KVM will no longer hold references to any memory that
  * was being used to back the VM prior to shutdown/destroy.
  */
-void kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *data);
+int kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *data);
 
 struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index);
 

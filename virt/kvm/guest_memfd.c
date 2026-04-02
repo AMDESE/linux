@@ -2081,15 +2081,18 @@ static int __kvm_gmem_create(struct kvm *kvm, loff_t size, u64 flags)
 		goto err_gmem;
 	}
 
+	if (kvm_gmem_has_custom_allocator(file_inode(file))) {
+		err = kvm_enqueue_finalize_work(kvm,
+						kvm_gmem_allocator_ops(file_inode(file))->finalize,
+						kvm_gmem_allocator_private(file_inode(file)));
+		if (err)
+			goto err_gmem;
+	}
+
 	kvm_get_kvm(kvm);
 	gmem->kvm = kvm;
 	xa_init(&gmem->bindings);
 	list_add(&gmem->entry, &file_inode(file)->i_mapping->i_private_list);
-
-	if (kvm_gmem_has_custom_allocator(file_inode(file)))
-		kvm_enqueue_finalize_work(kvm,
-					  kvm_gmem_allocator_ops(file_inode(file))->finalize,
-					  kvm_gmem_allocator_private(file_inode(file)));
 
 	fd_install(fd, file);
 	return fd;

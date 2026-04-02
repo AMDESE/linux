@@ -1263,17 +1263,22 @@ static void kvm_destroy_devices(struct kvm *kvm)
 	}
 }
 
-void kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *data)
+int kvm_enqueue_finalize_work(struct kvm *kvm, kvm_finalize_workfn fn, void *data)
 {
 	struct kvm_finalize_work *fwork;
 
 	fwork = kzalloc(sizeof(*fwork), GFP_KERNEL_ACCOUNT);
+	if (!fwork)
+		return -ENOMEM;
+
 	fwork->fn = fn;
 	fwork->data = data;
 
 	mutex_lock(&kvm->lock);
 	list_add_tail(&fwork->list, &kvm->finalize_work_list);
 	mutex_unlock(&kvm->lock);
+
+	return 0;
 }
 
 static void kvm_finalize(struct kvm *kvm)
