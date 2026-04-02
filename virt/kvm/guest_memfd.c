@@ -386,6 +386,7 @@ static int kvm_gmem_shareability_apply(struct inode *inode,
 	 * architecture before tracking it as shared in gmem.
 	 */
 	if (m == SHAREABILITY_ALL) {
+#ifdef CONFIG_HAVE_KVM_ARCH_GMEM_INVALIDATE
 		pgoff_t idx;
 
 		for (idx = work->start; idx < work->start + work->nr_pages; idx++) {
@@ -398,6 +399,7 @@ static int kvm_gmem_shareability_apply(struct inode *inode,
 				folio_put(folio);
 			}
 		}
+#endif
 	}
 
 	return kvm_gmem_shareability_store(mt, work->start, work->nr_pages, m);
