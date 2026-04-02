@@ -348,8 +348,8 @@ static void guestmem_hugetlb_merge_folio(struct folio *first_folio)
 		struct page *p = folio_page(first_folio, i);
 
 		pr_debug("%s: cleaning up flags for page %px pfn %lx flags %lx\n",
-			 __func__, p, page_to_pfn(p), p->flags);
-		p->flags &= ~(1UL << PG_unevictable);
+			 __func__, p, page_to_pfn(p), p->flags.f);
+		p->flags.f &= ~(1UL << PG_unevictable);
 	}
 
 	hugetlb_vmemmap_optimize_folio_nosync(h, first_folio);
