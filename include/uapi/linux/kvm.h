@@ -1602,8 +1602,9 @@ struct kvm_memory_attributes {
 
 #define KVM_CREATE_GUEST_MEMFD	_IOWR(KVMIO,  0xd4, struct kvm_create_guest_memfd)
 #define GUEST_MEMFD_FLAG_MMAP		(1ULL << 0)
-#define GUEST_MEMFD_FLAG_INIT_SHARED	(1ULL << 1)
+#define GUEST_MEMFD_FLAG_INIT_PRIVATE	(1ULL << 1)
 #define GUEST_MEMFD_FLAG_HUGETLB	(1ULL << 2)
+#define GUEST_MEMFD_FLAG_INIT_SHARED	(1ULL << 3)
 
 struct kvm_create_guest_memfd {
 	__u64 size;

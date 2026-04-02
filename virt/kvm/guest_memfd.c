@@ -2131,6 +2131,14 @@ int kvm_gmem_create(struct kvm *kvm, struct kvm_create_guest_memfd *args)
 	    flags & GUEST_MEMFD_FLAG_HUGETLB)
 		valid_flags |= SUPPORTED_CUSTOM_ALLOCATOR_MASK;
 
+	/*
+	 * To continue supporting older downstream QEMU builds, revert to
+	 * prior behavior of defaulting to shared for mmap()-able gmem
+	 * pages unless GUEST_MEMFD_FLAG_INIT_PRIVATE is specified.
+	 */
+	if (!(flags & GUEST_MEMFD_FLAG_INIT_PRIVATE))
+		flags |= GUEST_MEMFD_FLAG_INIT_SHARED;
+
 	if (flags & ~valid_flags)
 		return -EINVAL;
 
