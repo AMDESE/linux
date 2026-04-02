@@ -640,6 +640,7 @@ static void batch_from_pages(struct pfn_batch *batch, struct page **pages,
 			break;
 }
 
+#ifdef CONFIG_KVM_GUEST_MEMFD
 static bool is_guest_memfd(struct iopt_pages *pages)
 {
 	struct address_space *mapping;
@@ -654,6 +655,12 @@ static bool is_guest_memfd(struct iopt_pages *pages)
 
 	return mapping_inaccessible(mapping) && mapping_unevictable(mapping);
 }
+#else
+static bool is_guest_memfd(struct iopt_pages *pages)
+{
+	return false;
+}
+#endif
 
 static int batch_from_folios(struct pfn_batch *batch, struct folio ***folios_p,
 			     unsigned long *offset_p, unsigned long npages,
@@ -873,6 +880,7 @@ static long pin_memfd_pages(struct pfn_reader_user *user, unsigned long start,
 	return npages_out;
 }
 
+#ifdef CONFIG_KVM_GUEST_MEMFD
 static struct folio *guest_memfd_get_pfn(struct file *file, unsigned long index,
 					 unsigned long *pfn, int *max_order)
 {
@@ -944,6 +952,7 @@ static long pin_guest_memfd_pages(struct pfn_reader_user *user, loff_t start, un
 
 	return rc;
 }
+#endif /* CONFIG_KVM_GUEST_MEMFD */
 
 static int pfn_reader_user_pin(struct pfn_reader_user *user,
 			       struct iopt_pages *pages,
@@ -998,11 +1007,12 @@ static int pfn_reader_user_pin(struct pfn_reader_user *user,
 
 	if (user->file) {
 		start = pages->start + (start_index * PAGE_SIZE);
-		if (is_guest_memfd(pages)) {
+#ifdef CONFIG_KVM_GUEST_MEMFD
+		if (is_guest_memfd(pages))
 			rc = pin_guest_memfd_pages(user, start, npages);
-		} else {
+		else
+#endif
 			rc = pin_memfd_pages(user, start, npages);
-		}
 	} else if (!remote_mm) {
 		uptr = (uintptr_t)(pages->uptr + start_index * PAGE_SIZE);
 		rc = pin_user_pages_fast(uptr, npages, user->gup_flags,
