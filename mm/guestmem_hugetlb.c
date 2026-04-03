@@ -27,6 +27,7 @@ struct guestmem_hugetlb_private {
 	atomic_t teardown_count;
 	bool teardown_started;
 	bool kvm_finalized;
+	bool kvm_cb_completed;
 	size_t inode_size;
 };
 
@@ -432,7 +433,7 @@ static void spool_release_cb(struct hugepage_subpool *spool, void *data)
 	struct guestmem_hugetlb_private *private = data;
 
 	pr_debug_ratelimited("%s: called for spool %px data %px\n", __func__, spool, data);
-	private->spool_active = false;
+	WRITE_ONCE(private->spool_active, false);
 }
 
 static void *guestmem_hugetlb_setup(size_t size, u64 flags)
@@ -484,7 +485,7 @@ static void *guestmem_hugetlb_setup(size_t size, u64 flags)
 	private->h = h;
 	private->spool = spool;
 	private->h_cg_rsvd = h_cg_rsvd;
-	private->spool_active = true;
+	WRITE_ONCE(private->spool_active, true);
 
 	atomic_set(&private->teardown_count, 0);
 
@@ -503,17 +504,19 @@ static void teardown_finalize(struct guestmem_hugetlb_private *private)
 	unsigned long nr_pages;
 	int idx;
 
-	if (atomic_inc_return(&private->teardown_count) != 1) {
-		pr_debug("%s: already waiting for subpool pages to be freed for instance %px inode_size %ld\n",
-			 __func__, private, private->inode_size);
-		return;
-	}
-
 	pr_debug("%s: waiting for subpool pages to be freed for instance %px inode_size %ld\n",
 		 __func__, private, private->inode_size);
 
-	while (private->spool_active)
+	while (READ_ONCE(private->spool_active))
 		cond_resched();
+
+	/*
+	 * pairs with smp_wmb() prior to hugepage_put_subpool(), which is required
+	 * before spool_active is cleared. This guards against prematurely freeing
+	 * 'private' by acting as a refcount held by the inode teardown path which
+	 * might still be running concurrently.
+	 */
+	smp_rmb();
 
 	pr_debug("%s: finalizing instance %px\n", __func__, private);
 
@@ -524,9 +527,21 @@ static void teardown_finalize(struct guestmem_hugetlb_private *private)
 	kfree(private);
 }
 
+static bool claim_teardown(struct guestmem_hugetlb_private *private)
+{
+	if (atomic_inc_return(&private->teardown_count) != 1) {
+		pr_debug("%s: already waiting for subpool pages to be freed for instance %px inode_size %ld\n",
+			 __func__, private, private->inode_size);
+		return false;
+	}
+
+	return true;
+}
+
 static void guestmem_hugetlb_finalize(void *priv)
 {
 	struct guestmem_hugetlb_private *private = priv;
+	bool teardown_claimed = false;
 
 	pr_debug("%s: finalize callback for priv %px teardown_started %d\n",
 		 __func__, private, private->teardown_started);
@@ -545,14 +560,25 @@ static void guestmem_hugetlb_finalize(void *priv)
 	 * for cases where it gets called by multiple tasks.
 	 */
 	if (private->teardown_started)
+		teardown_claimed = claim_teardown(private);
+
+	/*
+	 * The callback isn't technically completed, but at this point
+	 * either this task has claimed the remainder of the teardown
+	 * work, or it lost the claim and the inode teardown task will
+	 * handle it as soon as this task sets 'kvm_cb_completed'.
+	 */
+	smp_wmb();
+	WRITE_ONCE(private->kvm_cb_completed, true);
+
+	if (teardown_claimed)
 		teardown_finalize(private);
 }
 
 static void guestmem_hugetlb_teardown(void *priv, size_t inode_size)
 {
 	struct guestmem_hugetlb_private *private = priv;
-
-	hugepage_put_subpool(private->spool);
+	bool teardown_claimed = false;
 
 	private->inode_size = inode_size;
 	private->teardown_started = true;
@@ -565,12 +591,48 @@ static void guestmem_hugetlb_teardown(void *priv, size_t inode_size)
 
 	/*
 	 * If KVM is finalized, it should be possible to reclaim all the
-	 * subpool pages and finalize here. It's possible KVM is already
-	 * trying to finalize, but the teardown_count will be used to
-	 * pick the winning task since it doesn't matter which one at
-	 * this point.
+	 * subpool pages and finalize at this point, but there are 3
+	 * possibilities to consider regarding the KVM finalize
+	 * callback/task:
+	 *
+	 * 1) it wins the claim to handle the teardown work, in which
+	 *    case this task will no longer need to access 'private' and
+	 *    the KVM callback can handle the kfree() of 'private'.
+	 * 2) it loses the claim to handle the teardown work, in which
+	 *    case it will complete execution without any need to access
+	 *    'private' and so this task can handle the final kfree().
+	 * 3) it hasn't yet attempted to claim the teardown, but will in
+	 *    the near future. some care here is needed to ensure this
+	 *    task doesn't kfree() 'private' before that happens. This is
+	 *    done by waiting for the 'kvm_cb_completed' flag to be set,
+	 *    at which point it will no longer need access to 'private'
+	 *    and this task can safely kfree() it.
 	 */
-	if (private->kvm_finalized)
+	if (private->kvm_finalized) {
+		teardown_claimed = claim_teardown(private);
+		if (teardown_claimed) {
+			pr_debug("kvm_finalized set, but inode teardown claimed the final teardown, priv %px\n", priv);
+			smp_rmb();
+			while (!READ_ONCE(private->kvm_cb_completed)) {
+				pr_debug_once("kvm_finalized set, but kvm callback is still running, priv %px\n", priv);
+				cond_resched();
+			}
+		}
+	}
+
+	/*
+	 * It's possible that the KVM callback runs concurrently and
+	 * wins the race to handle finalizing teardown. Once completed,
+	 * it will free 'private', but it cannot complete until the
+	 * below call to hugepage_put_subpool() triggers the
+	 * 'private->spool_active' true->false transition, so there's no
+	 * risk of the KVM callback kfree()'ing 'private' before this task
+	 * reaches here.
+	 */
+	smp_wmb();
+	hugepage_put_subpool(private->spool);
+
+	if (teardown_claimed)
 		teardown_finalize(private);
 }
 
