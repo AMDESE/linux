@@ -1288,6 +1288,7 @@ static void kvm_finalize(struct kvm *kvm)
 	mutex_lock(&kvm->lock);
 	list_for_each_entry_safe(fwork, tmp, &kvm->finalize_work_list, list) {
 		fwork->fn(fwork->data);
+		list_del(&fwork->list);
 		kfree(fwork);
 	}
 	mutex_unlock(&kvm->lock);
