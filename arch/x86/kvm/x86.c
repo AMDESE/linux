@@ -14083,11 +14083,10 @@ u64 kvm_arch_gmem_supported_content_modes(struct kvm *kvm)
 {
 	switch (kvm->arch.vm_type) {
 	case KVM_X86_SW_PROTECTED_VM:
-		return KVM_SET_MEMORY_ATTRIBUTES2_ZERO |
-		       KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE;
 	case KVM_X86_SNP_VM:
 	case KVM_X86_TDX_VM:
-		return KVM_SET_MEMORY_ATTRIBUTES2_ZERO;
+		return KVM_SET_MEMORY_ATTRIBUTES2_ZERO |
+		       KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE;
 	default:
 		return 0;
 	}
@@ -14120,6 +14119,26 @@ int kvm_arch_gmem_apply_content_mode_preserve(struct kvm *kvm,
 					      pgoff_t start, pgoff_t end)
 {
 	switch (kvm->arch.vm_type) {
+	case KVM_X86_SNP_VM:
+	case KVM_X86_TDX_VM:
+		/*
+		 * Preservation is only supported for VMs with protected state
+		 * up until the guest is launched and vCPUs become capable of
+		 * generating KVM MMU faults, since those accesses can trigger
+		 * paths that are destructive to the initial memory contents
+		 * from the guest point of view, e.g. plaintext data will become
+		 * random data after a shared->private conversion.
+		 *
+		 * Therefore, only the pre-launch user interfaces for
+		 * populating/encrypting initial guest memory can honor
+		 * "preserve" semantics (i.e. KVM_TDX_INIT_MEM_REGION or
+		 * SNP_LAUNCH_UPDATE), and these are only available prior to
+		 * the point in time when the launch phase has been finalized
+		 * and pre-faulting becomes allowed.
+		 */
+		if (kvm->arch.pre_fault_allowed)
+			return -EINVAL;
+		return 0;
 	case KVM_X86_SW_PROTECTED_VM:
 		return 0;
 	default:
