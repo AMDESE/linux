@@ -761,7 +761,7 @@ static int kvm_gmem_apply_content_mode(struct kvm *kvm, uint64_t content_mode,
 	case KVM_SET_MEMORY_ATTRIBUTES2_PRESERVE:
 		return kvm_arch_gmem_apply_content_mode_preserve(kvm, inode, start, end);
 	default:
-		WARN_ONCE(1, "Unexpected policy requested.");
+		WARN_ONCE(1, "Unexpected policy (%lx) requested.", content_mode);
 		return -EOPNOTSUPP;
 	}
 }
