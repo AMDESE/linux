@@ -3220,7 +3220,12 @@ out:
 		sev_supported_vmsa_features |= SVM_SEV_FEAT_DEBUG_SWAP;
 
 	if (sev_snp_enabled) {
-		sev_supported_vmsa_features |= SVM_SEV_FEAT_SNP_ACTIVE;
+		/*
+		 * Some SNP-only features such as BTB Isolation are
+		 * available on all systems that support SNP.
+		 */
+		sev_supported_vmsa_features |= SVM_SEV_FEAT_SNP_ACTIVE |
+					       SVM_SEV_FEAT_BTB_ISOLATION;
 
 		if (tsc_khz && cpu_feature_enabled(X86_FEATURE_SNP_SECURE_TSC))
 			sev_supported_vmsa_features |= SVM_SEV_FEAT_SECURE_TSC;
