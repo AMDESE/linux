@@ -14,16 +14,18 @@
 #include "kselftest.h"
 
 #define SVM_SEV_FEAT_DEBUG_SWAP		BIT_ULL(5)
+#define SVM_SEV_FEAT_SECURE_TSC		BIT_ULL(9)
+
+/* Features valid only for SNP guests, rejected for SEV-ES and below. */
+#define SNP_ONLY_FEATURES		(SVM_SEV_FEAT_SECURE_TSC)
 
 /*
  * Some features may have hidden dependencies, or may only work
  * for certain VM types.  Err on the side of safety and don't
  * expect that all supported features can be passed one by one
  * to KVM_SEV_INIT2.
- *
- * (Well, right now there's only one...)
  */
-#define KNOWN_FEATURES SVM_SEV_FEAT_DEBUG_SWAP
+#define KNOWN_FEATURES		(SVM_SEV_FEAT_DEBUG_SWAP | SNP_ONLY_FEATURES)
 
 int kvm_fd;
 u64 supported_vmsa_features;
@@ -112,7 +114,7 @@ void test_features(u32 vm_type, u64 supported_features)
 		if (!(supported_features & BIT_ULL(i)))
 			test_init2_invalid(vm_type,
 				&(struct kvm_sev_init){ .vmsa_features = BIT_ULL(i) },
-				"unknown feature");
+				"unknown or unsupported feature for VM type");
 		else if (KNOWN_FEATURES & BIT_ULL(i))
 			test_init2(vm_type,
 				&(struct kvm_sev_init){ .vmsa_features = BIT_ULL(i) });
@@ -161,7 +163,7 @@ int main(int argc, char *argv[])
 
 	test_features(KVM_X86_SEV_VM, 0);
 	if (have_sev_es)
-		test_features(KVM_X86_SEV_ES_VM, supported_vmsa_features);
+		test_features(KVM_X86_SEV_ES_VM, supported_vmsa_features & ~SNP_ONLY_FEATURES);
 	if (have_snp)
 		test_features(KVM_X86_SNP_VM, supported_vmsa_features);
 

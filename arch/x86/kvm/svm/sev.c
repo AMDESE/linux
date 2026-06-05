@@ -504,7 +504,7 @@ static int __sev_guest_init(struct kvm *kvm, struct kvm_sev_cmd *argp,
 		return -EINVAL;
 
 	if (!snp_active)
-		valid_vmsa_features &= ~SVM_SEV_FEAT_SECURE_TSC;
+		valid_vmsa_features &= ~SVM_SEV_FEAT_SNP_ONLY_MASK;
 
 	if (data->vmsa_features & ~valid_vmsa_features)
 		return -EINVAL;
