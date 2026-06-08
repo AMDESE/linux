@@ -13,7 +13,7 @@
 #include "svm_util.h"
 #include "kselftest.h"
 
-#define SVM_SEV_FEAT_DEBUG_SWAP 32u
+#define SVM_SEV_FEAT_DEBUG_SWAP		BIT_ULL(5)
 
 /*
  * Some features may have hidden dependencies, or may only work
