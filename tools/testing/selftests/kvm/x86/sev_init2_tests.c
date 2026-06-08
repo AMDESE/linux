@@ -16,10 +16,12 @@
 #define SVM_SEV_FEAT_SNP_ACTIVE		BIT_ULL(0)
 #define SVM_SEV_FEAT_DEBUG_SWAP		BIT_ULL(5)
 #define SVM_SEV_FEAT_SECURE_TSC		BIT_ULL(9)
+#define SVM_SEV_FEAT_IBPB_ON_ENTRY	BIT_ULL(21)
 
 /* Features valid only for SNP guests, rejected for SEV-ES and below. */
 #define SNP_ONLY_FEATURES		(SVM_SEV_FEAT_SNP_ACTIVE | \
-					 SVM_SEV_FEAT_SECURE_TSC)
+					 SVM_SEV_FEAT_SECURE_TSC | \
+					 SVM_SEV_FEAT_IBPB_ON_ENTRY)
 
 /*
  * Some features may have hidden dependencies, or may only work

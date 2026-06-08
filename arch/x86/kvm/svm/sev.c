@@ -3224,6 +3224,9 @@ out:
 
 		if (tsc_khz && cpu_feature_enabled(X86_FEATURE_SNP_SECURE_TSC))
 			sev_supported_vmsa_features |= SVM_SEV_FEAT_SECURE_TSC;
+
+		if (cpu_feature_enabled(X86_FEATURE_SNP_IBPB_ON_ENTRY))
+			sev_supported_vmsa_features |= SVM_SEV_FEAT_IBPB_ON_ENTRY;
 	}
 }
 
