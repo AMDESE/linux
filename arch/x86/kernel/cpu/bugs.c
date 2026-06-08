@@ -1956,10 +1956,8 @@ early_param("spectre_v2", spectre_v2_parse_cmdline);
 
 static enum spectre_v2_mitigation __init spectre_v2_select_retpoline(void)
 {
-	if (!IS_ENABLED(CONFIG_MITIGATION_RETPOLINE)) {
-		pr_err("Kernel not compiled with retpoline; no mitigation available!");
+	if (!IS_ENABLED(CONFIG_MITIGATION_RETPOLINE))
 		return SPECTRE_V2_NONE;
-	}
 
 	return SPECTRE_V2_RETPOLINE;
 }
@@ -2246,6 +2244,13 @@ static void __init spectre_v2_update_mitigation(void)
 			spectre_v2_enabled = SPECTRE_V2_IBRS;
 		}
 	}
+
+	if (!IS_ENABLED(CONFIG_MITIGATION_RETPOLINE) &&
+	    spectre_v2_enabled == SPECTRE_V2_NONE &&
+	    (spectre_v2_cmd == SPECTRE_V2_CMD_FORCE ||
+	     (spectre_v2_cmd == SPECTRE_V2_CMD_AUTO &&
+	      should_mitigate_vuln(X86_BUG_SPECTRE_V2))))
+		pr_err("Kernel not compiled with retpoline; no mitigation available!");
 
 	if (boot_cpu_has_bug(X86_BUG_SPECTRE_V2))
 		pr_info("%s\n", spectre_v2_strings[spectre_v2_enabled]);
