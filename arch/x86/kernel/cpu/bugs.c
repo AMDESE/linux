@@ -2204,6 +2204,15 @@ static void __init spectre_v2_select_mitigation(void)
 		}
 
 		spectre_v2_enabled = spectre_v2_select_retpoline();
+		/*
+		 * If retpoline is unavailable (e.g. built without
+		 * CONFIG_MITIGATION_RETPOLINE), fall back to eIBRS on
+		 * AutoIBRS-capable parts rather than leaving SNP hosts
+		 * unmitigated.
+		 */
+		if (spectre_v2_enabled == SPECTRE_V2_NONE &&
+		    boot_cpu_has(X86_FEATURE_AUTOIBRS))
+			spectre_v2_enabled = SPECTRE_V2_EIBRS;
 		break;
 
 	case SPECTRE_V2_CMD_RETPOLINE_LFENCE:
