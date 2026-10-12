@@ -2639,11 +2639,11 @@ static int sev_ioctl_do_snp_set_config(struct sev_issue_cmd *argp, bool writable
 	if (!writable)
 		return -EPERM;
 
-	if (!sev->snp_initialized)
-		return -ENODEV;
-
 	if (copy_from_user(&config, (void __user *)argp->data, sizeof(config)))
 		return -EFAULT;
+
+	if (!sev->snp_initialized)
+		return -ENODEV;
 
 	return __sev_do_cmd_locked(SEV_CMD_SNP_CONFIG, &config, &argp->error);
 }
@@ -2661,9 +2661,6 @@ static int sev_ioctl_do_snp_vlek_load(struct sev_issue_cmd *argp, bool writable)
 	if (!writable)
 		return -EPERM;
 
-	if (!sev->snp_initialized)
-		return -ENODEV;
-
 	if (copy_from_user(&input, u64_to_user_ptr(argp->data), sizeof(input)))
 		return -EFAULT;
 
@@ -2677,7 +2674,11 @@ static int sev_ioctl_do_snp_vlek_load(struct sev_issue_cmd *argp, bool writable)
 
 	input.vlek_wrapped_address = __psp_pa(blob);
 
-	ret = __sev_do_cmd_locked(SEV_CMD_SNP_VLEK_LOAD, &input, &argp->error);
+	if (sev->snp_initialized)
+		ret = __sev_do_cmd_locked(SEV_CMD_SNP_VLEK_LOAD, &input, &argp->error);
+	else
+		ret = -ENODEV;
+
 	kfree(blob);
 
 	return ret;
