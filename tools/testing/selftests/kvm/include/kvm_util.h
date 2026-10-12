@@ -837,6 +837,7 @@ void *addr_gpa2hva(struct kvm_vm *vm, gpa_t gpa);
 void *addr_gva2hva(struct kvm_vm *vm, gva_t gva);
 gpa_t addr_hva2gpa(struct kvm_vm *vm, void *hva);
 void *addr_gpa2alias(struct kvm_vm *vm, gpa_t gpa);
+int addr_gpa2gmemfd(struct kvm_vm *vm, gpa_t gpa);
 
 static inline int kvm_slot_to_fd(struct kvm_vm *vm, u32 slot)
 {

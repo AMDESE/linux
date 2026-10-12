@@ -1670,6 +1670,7 @@ static bool __kvm_rmap_zap_gfn_range(struct kvm *kvm,
 
 bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 {
+	unsigned long shared_private = KVM_FILTER_SHARED | KVM_FILTER_PRIVATE;
 	bool flush = false;
 
 	/*
@@ -1687,6 +1688,10 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 		flush = __kvm_rmap_zap_gfn_range(kvm, range->slot,
 						 range->start, range->end,
 						 range->may_block, flush);
+
+	if (gmem_in_place_conversion && !kvm_has_mirrored_tdp(kvm) &&
+	    ((range->attr_filter & shared_private) != shared_private))
+		return false;
 
 	if (tdp_mmu_enabled)
 		flush = kvm_tdp_mmu_unmap_gfn_range(kvm, range, flush);

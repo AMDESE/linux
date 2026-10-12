@@ -514,13 +514,17 @@ struct kvm_vm *__vm_create(struct vm_shape shape, u32 nr_runnable_vcpus,
 	 */
 	if (is_guest_memfd_required(shape)) {
 		flags |= KVM_MEM_GUEST_MEMFD;
+		/*
+		 * Allow mmap() and initialize the gmem instance as SHARED if
+		 * in-place conversions are supported, so that the memory can
+		 * be populated/initialized like any other memory region.
+		 */
 		if (kvm_has_gmem_attributes)
 			gmem_flags |= GUEST_MEMFD_FLAG_INIT_SHARED |
 				      GUEST_MEMFD_FLAG_MMAP;
 	}
 
-	vm_mem_add(vm, VM_MEM_SRC_ANONYMOUS, 0, 0, nr_pages, flags,
-		   -1, 0, gmem_flags);
+	vm_mem_add(vm, VM_MEM_SRC_ANONYMOUS, 0, 0, nr_pages, flags, -1, 0, gmem_flags);
 	for (i = 0; i < NR_MEM_REGIONS; i++)
 		vm->memslots[i] = 0;
 
@@ -1628,6 +1632,21 @@ void *addr_gpa2hva(struct kvm_vm *vm, gpa_t gpa)
 
 	return (void *)((uintptr_t)region->host_mem
 		+ (gpa - region->region.guest_phys_addr));
+}
+
+int addr_gpa2gmemfd(struct kvm_vm *vm, gpa_t gpa)
+{
+	struct userspace_mem_region *region;
+
+	gpa = vm_untag_gpa(vm, gpa);
+
+	region = userspace_mem_region_find(vm, gpa, gpa);
+	if (!region) {
+		TEST_FAIL("No vm physical memory at 0x%lx", gpa);
+		return NULL;
+	}
+
+	return region->region.guest_memfd;
 }
 
 /*
