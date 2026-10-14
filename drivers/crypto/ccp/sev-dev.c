@@ -2554,20 +2554,13 @@ e_free_pdh:
 	return ret;
 }
 
-static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
-					int *error)
+static int __sev_do_snp_platform_status(void *data, int *error, bool *free)
 {
 	struct sev_device *sev = psp_master->sev_data;
 	struct sev_data_snp_addr buf;
-	struct page *status_page;
-	void *data;
 	int ret;
 
-	status_page = alloc_page(GFP_KERNEL_ACCOUNT);
-	if (!status_page)
-		return -ENOMEM;
-
-	data = page_address(status_page);
+	*free = true;
 
 	/*
 	 * SNP_PLATFORM_STATUS can be executed in any SNP state. But if executed
@@ -2578,10 +2571,8 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 		 * Firmware expects the status page to be in Firmware state,
 		 * otherwise it will report an error INVALID_PAGE_STATE.
 		 */
-		if (rmp_mark_pages_firmware(__pa(data), 1, true)) {
-			ret = -EFAULT;
-			goto cleanup;
-		}
+		if (rmp_mark_pages_firmware(__pa(data), 1, true))
+			return -EFAULT;
 	}
 
 	buf.address = __psp_pa(data);
@@ -2591,11 +2582,36 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 		/*
 		 * The status page will be in Reclaim state on success, or left
 		 * in Firmware state on failure. Use snp_reclaim_pages() to
-		 * transition either case back to Hypervisor-owned state.
+		 * transition either case back to Hypervisor-owned state. If
+		 * for some reason that fails, it will have been added to the
+		 * leaked pages list, so indicate to the caller to not free
+		 * the page.
 		 */
-		if (snp_reclaim_pages(__pa(data), 1, true))
+		if (snp_reclaim_pages(__pa(data), 1, true)) {
+			*free = false;
 			return -EFAULT;
+		}
 	}
+
+	return ret;
+}
+
+static int sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
+				      int *error)
+{
+	struct page *status_page;
+	void *data;
+	bool free;
+	int ret;
+
+	status_page = alloc_page(GFP_KERNEL_ACCOUNT);
+	if (!status_page)
+		return -ENOMEM;
+
+	data = page_address(status_page);
+
+	scoped_guard(mutex, &sev_cmd_mutex)
+		ret = __sev_do_snp_platform_status(data, error, &free);
 
 	if (ret)
 		goto cleanup;
@@ -2603,7 +2619,8 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 	memcpy(status, data, sizeof(*status));
 
 cleanup:
-	__free_pages(status_page, 0);
+	if (free)
+		__free_pages(status_page, 0);
 	return ret;
 }
 
@@ -2615,8 +2632,7 @@ static int sev_ioctl_do_snp_platform_status(struct sev_issue_cmd *argp)
 	if (!argp->data)
 		return -EINVAL;
 
-	scoped_guard(mutex, &sev_cmd_mutex)
-		ret = __sev_do_snp_platform_status(&status, &argp->error);
+	ret = sev_do_snp_platform_status(&status, &argp->error);
 	if (ret < 0)
 		return ret;
 
@@ -3114,9 +3130,7 @@ static int get_v1_svn(struct sev_device *sev)
 	struct sev_user_data_snp_status status;
 	int ret, error = 0;
 
-	mutex_lock(&sev_cmd_mutex);
-	ret = __sev_do_snp_platform_status(&status, &error);
-	mutex_unlock(&sev_cmd_mutex);
+	ret = sev_do_snp_platform_status(&status, &error);
 	if (ret < 0)
 		return ret;
 
@@ -3131,9 +3145,7 @@ static int get_v2_svn(struct sev_device *sev)
 	struct sev_snp_tcb_version_turin *tcb;
 	int ret, error = 0;
 
-	mutex_lock(&sev_cmd_mutex);
-	ret = __sev_do_snp_platform_status(&status, &error);
-	mutex_unlock(&sev_cmd_mutex);
+	ret = sev_do_snp_platform_status(&status, &error);
 	if (ret < 0)
 		return ret;
 
