@@ -2532,8 +2532,8 @@ static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 	return ret;
 }
 
-static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
-					int *error)
+static int sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
+				      int *error)
 {
 	struct sev_device *sev = psp_master->sev_data;
 	void *data __free(free_page) = NULL;
@@ -2544,31 +2544,36 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 	if (!data)
 		return -ENOMEM;
 
-	/*
-	 * SNP_PLATFORM_STATUS can be executed in any SNP state. But if executed
-	 * when SNP has been initialized, the status page must be firmware-owned.
-	 */
-	if (sev->snp_initialized) {
+	scoped_guard(mutex, &sev_cmd_mutex) {
 		/*
-		 * Firmware expects the status page to be in Firmware state,
-		 * otherwise it will report an error INVALID_PAGE_STATE.
+		 * SNP_PLATFORM_STATUS can be executed in any SNP state. But if executed
+		 * when SNP has been initialized, the status page must be firmware-owned.
 		 */
-		if (rmp_mark_pages_firmware(__pa(data), 1, true))
-			return -EFAULT;
-	}
+		if (sev->snp_initialized) {
+			/*
+			 * Firmware expects the status page to be in Firmware state,
+			 * otherwise it will report an error INVALID_PAGE_STATE.
+			 */
+			if (rmp_mark_pages_firmware(__pa(data), 1, true))
+				return -EFAULT;
+		}
 
-	buf.address = __psp_pa(data);
-	ret = __sev_do_cmd_locked(SEV_CMD_SNP_PLATFORM_STATUS, &buf, error);
+		buf.address = __psp_pa(data);
+		ret = __sev_do_cmd_locked(SEV_CMD_SNP_PLATFORM_STATUS, &buf, error);
 
-	if (sev->snp_initialized) {
-		/*
-		 * The status page will be in Reclaim state on success, or left
-		 * in Firmware state on failure. Use snp_reclaim_pages() to
-		 * transition either case back to Hypervisor-owned state.
-		 */
-		if (snp_reclaim_pages(__pa(data), 1, true)) {
-			data = NULL;
-			return -EFAULT;
+		if (sev->snp_initialized) {
+			/*
+			 * The status page will be in Reclaim state on success, or left
+			 * in Firmware state on failure. Use snp_reclaim_pages() to
+			 * transition either case back to Hypervisor-owned state. If
+			 * for some reason that fails, it will have been added to the
+			 * leaked pages list, so indicate to the caller to not free
+			 * the page.
+			 */
+			if (snp_reclaim_pages(__pa(data), 1, true)) {
+				data = NULL;
+				return -EFAULT;
+			}
 		}
 	}
 
@@ -2586,8 +2591,7 @@ static int sev_ioctl_do_snp_platform_status(struct sev_issue_cmd *argp)
 	if (!argp->data)
 		return -EINVAL;
 
-	scoped_guard(mutex, &sev_cmd_mutex)
-		ret = __sev_do_snp_platform_status(&status, &argp->error);
+	ret = sev_do_snp_platform_status(&status, &argp->error);
 	if (ret < 0)
 		return ret;
 
@@ -3086,9 +3090,7 @@ static int get_v1_svn(struct sev_device *sev)
 	struct sev_user_data_snp_status status;
 	int ret, error = 0;
 
-	mutex_lock(&sev_cmd_mutex);
-	ret = __sev_do_snp_platform_status(&status, &error);
-	mutex_unlock(&sev_cmd_mutex);
+	ret = sev_do_snp_platform_status(&status, &error);
 	if (ret < 0)
 		return ret;
 
@@ -3103,9 +3105,7 @@ static int get_v2_svn(struct sev_device *sev)
 	struct sev_snp_tcb_version_turin *tcb;
 	int ret, error = 0;
 
-	mutex_lock(&sev_cmd_mutex);
-	ret = __sev_do_snp_platform_status(&status, &error);
-	mutex_unlock(&sev_cmd_mutex);
+	ret = sev_do_snp_platform_status(&status, &error);
 	if (ret < 0)
 		return ret;
 
