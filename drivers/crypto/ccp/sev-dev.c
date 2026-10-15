@@ -1986,7 +1986,7 @@ static int sev_ioctl_do_pek_csr(struct sev_issue_cmd *argp, bool writable)
 	bool shutdown_required = false;
 	struct sev_data_pek_csr data;
 	void __user *input_address;
-	void *blob = NULL;
+	void *blob __free(kfree) = NULL;
 	int ret;
 
 	if (!writable)
@@ -2017,7 +2017,7 @@ cmd:
 	if (sev->sev_plat_status.state == SEV_STATE_UNINIT) {
 		ret = sev_move_to_init_state(argp, &shutdown_required);
 		if (ret)
-			goto e_free_blob;
+			return ret;
 	}
 
 	ret = __sev_do_cmd_locked(SEV_CMD_PEK_CSR, &data, &argp->error);
@@ -2031,21 +2031,17 @@ cmd:
 	 */
 	input.length = data.len;
 
-	if (copy_to_user((void __user *)argp->data, &input, sizeof(input))) {
-		ret = -EFAULT;
-		goto e_free_blob;
-	}
+	if (copy_to_user((void __user *)argp->data, &input, sizeof(input)))
+		return -EFAULT;
 
 	if (ret || WARN_ON_ONCE(argp->error))
-		goto e_free_blob;
+		return ret;
 
 	if (blob) {
 		if (copy_to_user(input_address, blob, input.length))
 			ret = -EFAULT;
 	}
 
-e_free_blob:
-	kfree(blob);
 	return ret;
 }
 
