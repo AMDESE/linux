@@ -2536,16 +2536,13 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 					int *error)
 {
 	struct sev_device *sev = psp_master->sev_data;
+	void *data __free(free_page) = NULL;
 	struct sev_data_snp_addr buf;
-	struct page *status_page;
-	void *data;
 	int ret;
 
-	status_page = alloc_page(GFP_KERNEL_ACCOUNT);
-	if (!status_page)
+	data = (void *)get_zeroed_page(GFP_KERNEL_ACCOUNT);
+	if (!data)
 		return -ENOMEM;
-
-	data = page_address(status_page);
 
 	/*
 	 * SNP_PLATFORM_STATUS can be executed in any SNP state. But if executed
@@ -2556,10 +2553,8 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 		 * Firmware expects the status page to be in Firmware state,
 		 * otherwise it will report an error INVALID_PAGE_STATE.
 		 */
-		if (rmp_mark_pages_firmware(__pa(data), 1, true)) {
-			ret = -EFAULT;
-			goto cleanup;
-		}
+		if (rmp_mark_pages_firmware(__pa(data), 1, true))
+			return -EFAULT;
 	}
 
 	buf.address = __psp_pa(data);
@@ -2571,17 +2566,15 @@ static int __sev_do_snp_platform_status(struct sev_user_data_snp_status *status,
 		 * in Firmware state on failure. Use snp_reclaim_pages() to
 		 * transition either case back to Hypervisor-owned state.
 		 */
-		if (snp_reclaim_pages(__pa(data), 1, true))
+		if (snp_reclaim_pages(__pa(data), 1, true)) {
+			data = NULL;
 			return -EFAULT;
+		}
 	}
 
-	if (ret)
-		goto cleanup;
+	if (!ret)
+		memcpy(status, data, sizeof(*status));
 
-	memcpy(status, data, sizeof(*status));
-
-cleanup:
-	__free_pages(status_page, 0);
 	return ret;
 }
 
