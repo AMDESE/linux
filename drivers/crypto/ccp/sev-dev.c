@@ -2284,8 +2284,9 @@ static int sev_ioctl_do_pek_import(struct sev_issue_cmd *argp, bool writable)
 	struct sev_device *sev = psp_master->sev_data;
 	struct sev_user_data_pek_cert_import input;
 	struct sev_data_pek_cert_import data;
+	void *pek_blob __free(kfree) = NULL;
+	void *oca_blob __free(kfree) = NULL;
 	bool shutdown_required = false;
-	void *pek_blob, *oca_blob;
 	int ret;
 
 	if (!writable)
@@ -2305,30 +2306,24 @@ static int sev_ioctl_do_pek_import(struct sev_issue_cmd *argp, bool writable)
 
 	/* copy PEK certificate blobs from userspace */
 	oca_blob = psp_copy_user_blob(input.oca_cert_address, input.oca_cert_len);
-	if (IS_ERR(oca_blob)) {
-		ret = PTR_ERR(oca_blob);
-		goto e_free_pek;
-	}
+	if (IS_ERR(oca_blob))
+		return PTR_ERR(oca_blob);
 
 	data.oca_cert_address = __psp_pa(oca_blob);
 	data.oca_cert_len = input.oca_cert_len;
 
 	/* If platform is not in INIT state then transition it to INIT */
-	if (sev->sev_plat_status.state != SEV_STATE_INIT) {
+	if (sev->sev_plat_status.state != SEV_STATE_INIT)
 		ret = sev_move_to_init_state(argp, &shutdown_required);
-		if (ret)
-			goto e_free_oca;
-	}
+	else
+		ret = 0;
 
-	ret = __sev_do_cmd_locked(SEV_CMD_PEK_CERT_IMPORT, &data, &argp->error);
+	if (!ret)
+		ret = __sev_do_cmd_locked(SEV_CMD_PEK_CERT_IMPORT, &data, &argp->error);
 
-e_free_oca:
 	if (shutdown_required)
 		__sev_firmware_shutdown(sev, false);
 
-	kfree(oca_blob);
-e_free_pek:
-	kfree(pek_blob);
 	return ret;
 }
 
