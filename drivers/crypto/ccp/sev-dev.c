@@ -2434,9 +2434,9 @@ static int sev_ioctl_do_get_id(struct sev_issue_cmd *argp)
 
 static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 {
+	void *pdh_blob __free(kfree) = NULL, *cert_blob __free(kfree) = NULL;
 	struct sev_device *sev = psp_master->sev_data;
 	struct sev_user_data_pdh_cert_export input;
-	void *pdh_blob = NULL, *cert_blob = NULL;
 	struct sev_data_pdh_cert_export data;
 	void __user *input_cert_chain_address;
 	void __user *input_pdh_cert_address;
@@ -2474,10 +2474,8 @@ static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 	data.pdh_cert_len = input.pdh_cert_len;
 
 	cert_blob = kzalloc(input.cert_chain_len, GFP_KERNEL);
-	if (!cert_blob) {
-		ret = -ENOMEM;
-		goto e_free_pdh;
-	}
+	if (!cert_blob)
+		return -ENOMEM;
 
 	data.cert_chain_address = __psp_pa(cert_blob);
 	data.cert_chain_len = input.cert_chain_len;
@@ -2486,12 +2484,11 @@ cmd:
 	/* If platform is not in INIT state then transition it to INIT. */
 	if (sev->sev_plat_status.state != SEV_STATE_INIT) {
 		if (!writable) {
-			ret = -EPERM;
-			goto e_free_cert;
+			return -EPERM;
 		}
 		ret = sev_move_to_init_state(argp, &shutdown_required);
 		if (ret)
-			goto e_free_cert;
+			return ret;
 	}
 
 	ret = __sev_do_cmd_locked(SEV_CMD_PDH_CERT_EXPORT, &data, &argp->error);
@@ -2506,32 +2503,24 @@ cmd:
 	input.cert_chain_len = data.cert_chain_len;
 	input.pdh_cert_len = data.pdh_cert_len;
 
-	if (copy_to_user((void __user *)argp->data, &input, sizeof(input))) {
-		ret = -EFAULT;
-		goto e_free_cert;
-	}
+	if (copy_to_user((void __user *)argp->data, &input, sizeof(input)))
+		return -EFAULT;
 
 	if (ret || WARN_ON_ONCE(argp->error))
-		goto e_free_cert;
+		return ret;
 
 	if (pdh_blob) {
 		if (copy_to_user(input_pdh_cert_address,
-				 pdh_blob, input.pdh_cert_len)) {
-			ret = -EFAULT;
-			goto e_free_cert;
-		}
+				 pdh_blob, input.pdh_cert_len))
+			return -EFAULT;
 	}
 
 	if (cert_blob) {
 		if (copy_to_user(input_cert_chain_address,
 				 cert_blob, input.cert_chain_len))
-			ret = -EFAULT;
+			return -EFAULT;
 	}
 
-e_free_cert:
-	kfree(cert_blob);
-e_free_pdh:
-	kfree(pdh_blob);
 	return ret;
 }
 
