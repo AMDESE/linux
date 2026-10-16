@@ -2451,41 +2451,38 @@ static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 	input_pdh_cert_address = (void __user *)input.pdh_cert_address;
 	input_cert_chain_address = (void __user *)input.cert_chain_address;
 
-	/* Userspace wants to query the certificate length. */
-	if (!input.pdh_cert_address ||
-	    !input.pdh_cert_len ||
-	    !input.cert_chain_address ||
-	    !input.cert_chain_len)
-		goto cmd;
+	/* Otherwise, userspace just wants to query the certificate length. */
+	if (input.pdh_cert_address &&
+	    input.pdh_cert_len &&
+	    input.cert_chain_address &&
+	    input.cert_chain_len) {
+		/* Allocate a physically contiguous buffer to store the PDH blob. */
+		if (input.pdh_cert_len > SEV_FW_BLOB_MAX_SIZE)
+			return -EFAULT;
 
-	/* Allocate a physically contiguous buffer to store the PDH blob. */
-	if (input.pdh_cert_len > SEV_FW_BLOB_MAX_SIZE)
-		return -EFAULT;
+		/* Allocate a physically contiguous buffer to store the cert chain blob. */
+		if (input.cert_chain_len > SEV_FW_BLOB_MAX_SIZE)
+			return -EFAULT;
 
-	/* Allocate a physically contiguous buffer to store the cert chain blob. */
-	if (input.cert_chain_len > SEV_FW_BLOB_MAX_SIZE)
-		return -EFAULT;
+		pdh_blob = kzalloc(input.pdh_cert_len, GFP_KERNEL);
+		if (!pdh_blob)
+			return -ENOMEM;
 
-	pdh_blob = kzalloc(input.pdh_cert_len, GFP_KERNEL);
-	if (!pdh_blob)
-		return -ENOMEM;
+		data.pdh_cert_address = __psp_pa(pdh_blob);
+		data.pdh_cert_len = input.pdh_cert_len;
 
-	data.pdh_cert_address = __psp_pa(pdh_blob);
-	data.pdh_cert_len = input.pdh_cert_len;
+		cert_blob = kzalloc(input.cert_chain_len, GFP_KERNEL);
+		if (!cert_blob)
+			return -ENOMEM;
 
-	cert_blob = kzalloc(input.cert_chain_len, GFP_KERNEL);
-	if (!cert_blob)
-		return -ENOMEM;
+		data.cert_chain_address = __psp_pa(cert_blob);
+		data.cert_chain_len = input.cert_chain_len;
+	}
 
-	data.cert_chain_address = __psp_pa(cert_blob);
-	data.cert_chain_len = input.cert_chain_len;
-
-cmd:
 	/* If platform is not in INIT state then transition it to INIT. */
 	if (sev->sev_plat_status.state != SEV_STATE_INIT) {
-		if (!writable) {
+		if (!writable)
 			return -EPERM;
-		}
 		ret = sev_move_to_init_state(argp, &shutdown_required);
 		if (ret)
 			return ret;
